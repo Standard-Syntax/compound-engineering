@@ -7,7 +7,6 @@
     ".": {
       "release-type": "simple",
       "package-name": "cli",
-      "skip-changelog": true,
       "extra-files": [
         {
           "type": "json",
@@ -19,7 +18,6 @@
     "plugins/compound-engineering": {
       "release-type": "simple",
       "package-name": "compound-engineering",
-      "skip-changelog": true,
       "extra-files": [
         {
           "type": "json",
@@ -36,7 +34,6 @@
     "plugins/coding-tutor": {
       "release-type": "simple",
       "package-name": "coding-tutor",
-      "skip-changelog": true,
       "extra-files": [
         {
           "type": "json",
@@ -53,7 +50,6 @@
     ".claude-plugin": {
       "release-type": "simple",
       "package-name": "marketplace",
-      "skip-changelog": true,
       "extra-files": [
         {
           "type": "json",
