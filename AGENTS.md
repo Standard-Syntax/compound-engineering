@@ -4,7 +4,6 @@ This repository primarily houses the `compound-engineering` coding-agent plugin 
 
 It also contains:
 - the Bun/TypeScript CLI that converts Claude Code plugins into other agent platform formats
-- additional plugins under `plugins/`, such as `coding-tutor`
 - shared release and metadata infrastructure for the CLI, marketplace, and plugins
 
 `AGENTS.md` is the canonical repo instruction file. Root `CLAUDE.md` exists only as a compatibility shim for tools and conversions that still look for it.
@@ -23,7 +22,7 @@ uv run ty check src/
 - **Branching:** Create a feature branch for any non-trivial change. If already on the correct branch for the task, keep using it; do not create additional branches or worktrees unless explicitly requested.
 - **Safety:** Do not delete or overwrite user data. Avoid destructive commands.
 - **Testing:** Run `uv run pytest` after changes that affect parsing, conversion, or output.
-- **Release versioning:** Releases are prepared by release automation, not normal feature PRs. The repo now has multiple release components (`cli`, `compound-engineering`, `coding-tutor`, `marketplace`). GitHub release PRs and GitHub Releases are the canonical release-notes surface for new releases; root `CHANGELOG.md` is only a pointer to that history. Use conventional titles such as `feat:` and `fix:` so release automation can classify change intent, but do not hand-bump release-owned versions or hand-author release notes in routine PRs.
+- **Release versioning:** Releases are prepared by release automation, not normal feature PRs. The repo now has multiple release components (`cli`, `compound-engineering`, `marketplace`). GitHub release PRs and GitHub Releases are the canonical release-notes surface for new releases; root `CHANGELOG.md` is only a pointer to that history. Use conventional titles such as `feat:` and `fix:` so release automation can classify change intent, but do not hand-bump release-owned versions or hand-author release notes in routine PRs.
 - **Output Paths:** Keep OpenCode output at `opencode.json` and `.opencode/{agents,skills,plugins}`. For OpenCode, command go to `~/.config/opencode/commands/<name>.md`; `opencode.json` is deep-merged (never overwritten wholesale).
 - **Scratch Space:** When authoring or editing skills and agents that need repo-local scratch space, instruct them to use `.context/` for ephemeral collaboration artifacts. Namespace compound-engineering workflow state under `.context/compound-engineering/<workflow-or-skill-name>/`, add a per-run subdirectory when concurrent runs are plausible, and clean scratch artifacts up after successful completion unless the user asked to inspect them or another agent still needs them. Durable outputs like plans, specs, learnings, and docs do not belong in `.context/`.
 - **ASCII-first:** Use ASCII unless the file already contains Unicode.
@@ -32,7 +31,7 @@ uv run ty check src/
 
 ```
 src/              CLI entry point, parsers, converters, target writers
-plugins/          Plugin workspaces (compound-engineering, coding-tutor)
+plugins/          Plugin workspaces (compound-engineering)
 .claude-plugin/   Claude marketplace catalog metadata
 tests/            Converter, writer, and CLI tests + fixtures
 docs/             Requirements, plans, solutions, and target specs
@@ -45,7 +44,6 @@ Changes in this repo may affect one or more of these surfaces:
 - `compound-engineering` under `plugins/compound-engineering/`
 - the Claude marketplace catalog under `.claude-plugin/`
 - the converter/install CLI in `src/` and `package.json`
-- secondary plugins such as `plugins/coding-tutor/`
 
 Do not assume a repo change is "just CLI" or "just plugin" without checking which surface owns the affected files.
 
@@ -76,7 +74,6 @@ cat plugins/compound-engineering/.claude-plugin/plugin.json | jq .
 ## Commit Conventions
 
 - Use conventional titles such as `feat: ...`, `fix: ...`, `docs: ...`, and `refactor: ...`.
-- Component scope is optional. Example: `feat(coding-tutor): add quiz reset`.
 - Breaking changes must be explicit with `!` or a breaking-change footer so release automation can classify them correctly.
 
 ## Agent References in Skills

@@ -20,7 +20,7 @@ The broader repo-level release model now lives in:
 
 - `docs/solutions/workflow/manual-release-please-github-releases.md`
 
-That doc covers the standing release PR, component ownership across `cli`, `compound-engineering`, `coding-tutor`, and `marketplace`, and the GitHub Releases model for published release notes. This document stays narrower: it is the plugin-scoped reminder for contributors changing `plugins/compound-engineering/**`.
+That doc covers the standing release PR, component ownership across `cli`, `compound-engineering`, and `marketplace`, and the GitHub Releases model for published release notes. This document stays narrower: it is the plugin-scoped reminder for contributors changing `plugins/compound-engineering/**`.
 
 ## Solution
 

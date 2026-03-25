@@ -14,7 +14,7 @@ The repository currently has one automated release flow for the npm CLI, but the
 - R1. The release process must be manually triggered; merging to `main` must not automatically publish a release.
 - R2. The release system must support batching: releasable merges may accumulate on `main` until maintainers decide to cut a release.
 - R3. The release system must maintain a single release PR for the whole repo that stays open until merged and automatically accumulates additional releasable changes merged to `main`.
-- R4. The release system must support independent version bumps for these components: `cli`, `compound-engineering`, `coding-tutor`, and `marketplace`.
+- R4. The release system must support independent version bumps for these components: `cli`, `compound-engineering`, and `marketplace`.
 - R5. The release system must not bump untouched plugins or unrelated components.
 - R6. The release system must preserve one centralized root `CHANGELOG.md` as the canonical changelog for the repository.
 - R7. The root changelog must record releases as top-level entries per component version, rather than requiring separate changelog files per plugin.
@@ -42,7 +42,6 @@ The repository currently has one automated release flow for the npm CLI, but the
 
 - Maintainers can let multiple PRs merge to `main` without immediately cutting a release.
 - At any point, maintainers can inspect a release PR or dry run and understand what would ship next.
-- A change to `coding-tutor` does not force a version bump to `compound-engineering`.
 - A plugin version bump does not force a marketplace version bump unless marketplace-level files changed.
 - Release-owned metadata and counts stay in sync without relying on a local slash command.
 - The root changelog remains readable and continuous before and after the migration.
