@@ -6,8 +6,8 @@ AI-powered development tools that get smarter with every use. Make each unit of 
 
 | Component | Count |
 |-----------|-------|
-| Agents | 25+ |
-| Skills | 40+ |
+| Agents | 29 |
+| Skills | 70 |
 | MCP Servers | 1 |
 
 ## Agents
@@ -20,19 +20,20 @@ Agents are organized into categories for easier discovery.
 |-------|-------------|
 | `agent-native-reviewer` | Verify features are agent-native (action + context parity) |
 | `architecture-strategist` | Analyze architectural decisions and compliance |
+| `ai-agent-reviewer` | Reviews LangGraph and PydanticAI agent code for correctness |
+| `async-patterns-reviewer` | Reviews async Python code for structured concurrency correctness |
 | `code-simplicity-reviewer` | Final pass for simplicity and minimalism |
 | `data-integrity-guardian` | Database migrations and data integrity |
 | `data-migration-expert` | Validate ID mappings match production, check for swapped values |
 | `deployment-verification-agent` | Create Go/No-Go deployment checklists for risky data changes |
-| `dhh-rails-reviewer` | Rails review from DHH's perspective |
-| `julik-frontend-races-reviewer` | Review JavaScript/Stimulus code for race conditions |
-| `kieran-rails-reviewer` | Rails code review with strict conventions |
-| `kieran-python-reviewer` | Python code review with strict conventions |
-| `kieran-typescript-reviewer` | TypeScript code review with strict conventions |
+| `kieran-python-reviewer` | Python code review enforcing Python 3.13+ stack conventions |
+| `migration-drift-detector` | Detect unrelated Alembic or Django migration file changes in PRs |
 | `pattern-recognition-specialist` | Analyze code for patterns and anti-patterns |
 | `performance-oracle` | Performance analysis and optimization |
-| `schema-drift-detector` | Detect unrelated schema.rb changes in PRs |
+| `pydantic-v2-validator` | Validates that all Pydantic models use the v2 API |
+| `python-modern-reviewer` | Flags Python syntax that predates Python 3.13 |
 | `security-sentinel` | Security audits and vulnerability assessments |
+| `toolchain-conformance-checker` | Verifies project infrastructure matches the required Python toolchain |
 
 ### Research
 
@@ -58,15 +59,9 @@ Agents are organized into categories for easier discovery.
 | Agent | Description |
 |-------|-------------|
 | `bug-reproduction-validator` | Systematically reproduce and validate bug reports |
-| `lint` | Run linting and code quality checks on Ruby and ERB files |
 | `pr-comment-resolver` | Address PR comments and implement fixes |
+| `python-lint` | Runs ruff and ty on changed Python files and reports violations |
 | `spec-flow-analyzer` | Analyze user flows and identify gaps in specifications |
-
-### Docs
-
-| Agent | Description |
-|-------|-------------|
-| `ankane-readme-writer` | Create READMEs following Ankane-style template for Ruby gems |
 
 ## Commands
 
@@ -83,6 +78,9 @@ Core workflow commands use `ce:` prefix to unambiguously identify them as compou
 | `/ce:work` | Execute work items systematically |
 | `/ce:compound` | Document solved problems to compound team knowledge |
 | `/ce:compound-refresh` | Refresh stale or drifting learnings and decide whether to keep, update, replace, or archive them |
+| `/ce:scaffold` | Generate a new Python 3.13 project skeleton |
+| `/ce:retrospect` | Analyze learnings from the past two weeks and surface patterns |
+| `/ce:calibrate` | Record estimation accuracy for iteration planning |
 
 ### Utility Commands
 
@@ -100,7 +98,6 @@ Core workflow commands use `ce:` prefix to unambiguously identify them as compou
 | `/resolve-todo-parallel` | Resolve todos in parallel |
 | `/triage` | Triage and prioritize issues |
 | `/test-browser` | Run browser tests on PR-affected pages |
-| `/test-xcode` | Build and test iOS apps on simulator |
 | `/feature-video` | Record video walkthroughs and add to PR description |
 
 ## Skills
@@ -115,10 +112,7 @@ Core workflow commands use `ce:` prefix to unambiguously identify them as compou
 
 | Skill | Description |
 |-------|-------------|
-| `andrew-kane-gem-writer` | Write Ruby gems following Andrew Kane's patterns |
 | `compound-docs` | Capture solved problems as categorized documentation |
-| `dhh-rails-style` | Write Ruby/Rails code in DHH's 37signals style |
-| `dspy-ruby` | Build type-safe LLM applications with DSPy.rb |
 | `frontend-design` | Create production-grade frontend interfaces |
 
 
@@ -127,10 +121,8 @@ Core workflow commands use `ce:` prefix to unambiguously identify them as compou
 | Skill | Description |
 |-------|-------------|
 | `document-review` | Improve documents through structured self-review |
-| `every-style-editor` | Review copy for Every's style guide compliance |
 | `file-todos` | File-based todo tracking system |
 | `git-worktree` | Manage Git worktrees for parallel development |
-| `proof` | Create, edit, and share documents via Proof collaborative editor |
 | `claude-permissions-optimizer` | Optimize Claude Code permissions from session history |
 | `resolve-pr-parallel` | Resolve PR review comments in parallel |
 | `setup` | Configure which review agents run for your project |
@@ -164,22 +156,6 @@ Experimental versions of core workflow skills. These are being tested before rep
 
 To test: invoke `/ce:plan-beta` or `/deepen-plan-beta` directly. Plans produced by the beta skills are compatible with `/ce:work`.
 
-### Image Generation
-
-| Skill | Description |
-|-------|-------------|
-| `gemini-imagegen` | Generate and edit images using Google's Gemini API |
-
-**gemini-imagegen features:**
-- Text-to-image generation
-- Image editing and manipulation
-- Multi-turn refinement
-- Multiple reference image composition (up to 14 images)
-
-**Requirements:**
-- `GEMINI_API_KEY` environment variable
-- Python packages: `google-genai`, `pillow`
-
 ## MCP Servers
 
 | Server | Description |
@@ -211,9 +187,18 @@ The `agent-browser` skill provides comprehensive documentation on usage.
 
 ## Installation
 
-```bash
-claude /plugin install compound-engineering
 ```
+/plugin marketplace add Standard-Syntax/compound-engineering
+/plugin install compound-engineering
+```
+
+For local development, add this alias to your shell profile:
+
+```bash
+alias claude-dev-ce='claude --plugin-dir ~/path/to/compound-engineering/plugins/compound-engineering'
+```
+
+Then run `claude-dev-ce` instead of `claude` to test your changes.
 
 ## Known Issues
 
