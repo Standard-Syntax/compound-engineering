@@ -4,16 +4,9 @@
   "release-search-depth": 20,
   "commit-search-depth": 50,
   "packages": {
-    ".": {
+    "ce_engine": {
       "release-type": "simple",
-      "package-name": "cli",
-      "extra-files": [
-        {
-          "type": "json",
-          "path": "package.json",
-          "jsonpath": "$.version"
-        }
-      ]
+      "package-name": "ce-engine"
     },
     "plugins/compound-engineering": {
       "release-type": "simple",
@@ -22,11 +15,6 @@
         {
           "type": "json",
           "path": ".claude-plugin/plugin.json",
-          "jsonpath": "$.version"
-        },
-        {
-          "type": "json",
-          "path": ".cursor-plugin/plugin.json",
           "jsonpath": "$.version"
         }
       ]
@@ -39,28 +27,12 @@
           "type": "json",
           "path": ".claude-plugin/plugin.json",
           "jsonpath": "$.version"
-        },
-        {
-          "type": "json",
-          "path": ".cursor-plugin/plugin.json",
-          "jsonpath": "$.version"
         }
       ]
     },
     ".claude-plugin": {
       "release-type": "simple",
       "package-name": "marketplace",
-      "extra-files": [
-        {
-          "type": "json",
-          "path": "marketplace.json",
-          "jsonpath": "$.metadata.version"
-        }
-      ]
-    },
-    ".cursor-plugin": {
-      "release-type": "simple",
-      "package-name": "cursor-marketplace",
       "extra-files": [
         {
           "type": "json",
