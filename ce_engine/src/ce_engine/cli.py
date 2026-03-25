@@ -74,7 +74,21 @@ def _print_usage() -> None:
     print("  ce-work 'Add JWT auth' .context/compound-engineering/plan/plan.md abc-123")
 
 
-def _handle_interrupt(interrupt_data: dict) -> str:
+def _get_interrupt_response(session_id: str, interrupt_type: str) -> str:
+    """Read interrupt response from a response file if it exists, otherwise prompt stdin.
+
+    This allows agents to provide interrupt responses by pre-creating response files:
+    /tmp/ce-work-{session_id}-{interrupt_type}.response
+    """
+    response_file = Path(f"/tmp/ce-work-{session_id}-{interrupt_type}.response")
+    if response_file.exists():
+        response = response_file.read_text().strip()
+        response_file.unlink()
+        return response
+    return input().strip()
+
+
+def _handle_interrupt(interrupt_data: dict, session_id: str) -> str:
     """Present interrupt information and collect human response."""
     interrupt_type = interrupt_data.get("type", "unknown")
 
@@ -85,7 +99,7 @@ def _handle_interrupt(interrupt_data: dict) -> str:
         for i, opt in enumerate(options, 1):
             print(f"  {i}. {opt}")
         print("Enter your choice (number or free text): ", end="", flush=True)
-        raw = input().strip()
+        raw = _get_interrupt_response(session_id, "blocked")
         try:
             idx = int(raw) - 1
             if 0 <= idx < len(options):
@@ -98,21 +112,21 @@ def _handle_interrupt(interrupt_data: dict) -> str:
         print(f"Operation: {interrupt_data.get('operation', 'unknown')}")
         print(f"Files affected: {interrupt_data.get('files', [])}")
         print("Approve? (yes/no): ", end="", flush=True)
-        return input().strip().lower()
+        return _get_interrupt_response(session_id, "risky_operation")
     elif interrupt_type == "plan_gap":
         print("\n--- PLAN GAP DETECTED ---")
         print(f"Gap: {interrupt_data.get('description', 'No description')}")
         print("  1. Include in this work")
         print("  2. Defer to next plan")
         print("Enter choice (1/2): ", end="", flush=True)
-        raw = input().strip()
+        raw = _get_interrupt_response(session_id, "plan_gap")
         return "include in this work" if raw == "1" else "defer to next plan"
 
     # Unknown interrupt type -- ask for free text
     print(f"\n--- PAUSED ({interrupt_type}) ---")
     print(f"Data: {interrupt_data}")
     print("Enter response: ", end="", flush=True)
-    return input().strip()
+    return _get_interrupt_response(session_id, "unknown")
 
 
 async def _run_work(task: str, plan_ref: str, session_id: str | None = None) -> None:
@@ -149,7 +163,6 @@ async def _run_work(task: str, plan_ref: str, session_id: str | None = None) -> 
             work_intent=None,
             llm_response="",
             approved=False,
-            session_id=thread_id,
         )
         result = await graph.ainvoke(initial_state, config)
 
@@ -163,7 +176,7 @@ async def _run_work(task: str, plan_ref: str, session_id: str | None = None) -> 
         if not isinstance(interrupt_data, dict):
             logging.warning("Unexpected interrupt value type: %s", type(interrupt_data))
             interrupt_data = {"type": "unknown", "data": str(interrupt_data)[:200]}
-        response = _handle_interrupt(interrupt_data)
+        response = _handle_interrupt(interrupt_data, thread_id)
         result = await graph.ainvoke(Command(resume=response), config)
 
     print("\n--- WORK LOOP COMPLETE ---")

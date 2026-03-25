@@ -40,10 +40,8 @@ class TestWorkState:
             work_intent=None,
             llm_response=None,
             approved=False,
-            session_id="test-session-123",
         )
         assert state.iteration == 2
-        assert state.session_id == "test-session-123"
         assert state.approved is False
 
     def test_serialization_roundtrip(self) -> None:

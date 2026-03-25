@@ -4,6 +4,7 @@ All subprocess calls use anyio.fail_after() for timeout -- anyio.run_process()
 has NO built-in timeout parameter.
 """
 
+import json
 from dataclasses import dataclass
 
 import anyio
@@ -39,7 +40,9 @@ async def run_command(cmd: list[str], timeout: float = 30.0) -> CommandResult:
                 stdout=result.stdout.decode(),
                 stderr=result.stderr.decode(),
             )
-    except anyio.TimeoutError:
+    # Use BaseException (not TimeoutError) to catch ExceptionGroup-wrapped
+    # TimeoutError that Python 3.11+ can raise inside TaskGroup.cancel().
+    except BaseException:
         return CommandResult(returncode=124, stdout="", stderr="Command timed out")
 
 
@@ -53,14 +56,12 @@ async def run_ruff_check(path: str = ".") -> list[RuffError]:
         List of RuffError objects (may be empty).
     """
     result = await run_command(
-        ["ruff", "check", "--output-format=json", path],
+        ["ruff", "check", "--output-format=json", "--", path],
         timeout=settings.lint_timeout,
     )
     if not result.stdout.strip():
         return []
     try:
-        import json
-
         data = json.loads(result.stdout)
         return [RuffError.model_validate(err) for err in data]
     except json.JSONDecodeError:
@@ -77,7 +78,7 @@ async def run_ty_check(path: str = ".") -> str:
         Trimmed stdout/stderr output or empty string if clean.
     """
     result = await run_command(
-        ["ty", "check", path],
+        ["ty", "check", "--", path],
         timeout=settings.lint_timeout,
     )
     if result.returncode == 0:
@@ -96,7 +97,7 @@ async def run_pytest(path: str = ".") -> CommandResult:
         CommandResult with pytest output.
     """
     return await run_command(
-        ["uv", "run", "pytest", "--tb=short", "-q", path],
+        ["uv", "run", "pytest", "--tb=short", "-q", "--", path],
         timeout=settings.pytest_timeout,
     )
 

@@ -46,7 +46,7 @@ class WorkIntent(BaseModel):
 class WorkState(BaseModel):
     """Graph-level state passed to every node."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="ignore")
 
     # Task information
     task_description: str = ""
@@ -72,7 +72,6 @@ class WorkState(BaseModel):
 
     # Control
     approved: bool = False
-    session_id: str = ""
 
 
 def make_continue_intent() -> WorkIntent:

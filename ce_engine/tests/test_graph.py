@@ -26,7 +26,6 @@ class TestRouteIntent:
             work_intent=None,
             llm_response=None,
             approved=False,
-            session_id="test-session",
         )
         defaults.update(overrides)
         return WorkState(**defaults)
@@ -65,7 +64,9 @@ class TestRouteIntent:
         )
         assert _route_intent(state) == "human_interrupt_node"
 
-    def test_risky_operation_routes_to_risky_op_interrupt(self) -> None:
+    def test_risky_operation_routes_to_error_compact(self) -> None:
+        # risky_operation is dead code -- the operation is never executed.
+        # Falls through to the default case which routes to error_compact_node.
         state = self._make_state(
             work_intent=WorkIntent(
                 intent="risky_operation",
@@ -76,7 +77,7 @@ class TestRouteIntent:
                 description=None,
             )
         )
-        assert _route_intent(state) == "risky_op_interrupt_node"
+        assert _route_intent(state) == "error_compact_node"
 
     def test_plan_gap_routes_to_plan_gap_node(self) -> None:
         state = self._make_state(
@@ -138,7 +139,6 @@ class TestRouteValidate:
             work_intent=None,
             llm_response=None,
             approved=False,
-            session_id="test-session",
         )
 
     def test_fix_failing_tests_continues(self) -> None:

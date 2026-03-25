@@ -5,15 +5,18 @@ All nodes are async def. Subprocess calls use anyio.fail_after() for timeout
 is created at module level to preserve connection pool across retries.
 """
 
+import asyncio
 import json
 from pathlib import Path
+from typing import cast
 
 import anyio
+from httpx import HTTPError as HttpxHTTPError
 from langchain_anthropic import ChatAnthropic
 from langgraph.types import interrupt
 from tenacity import (
+    AsyncRetrying,
     RetryError,
-    retry,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
@@ -30,8 +33,19 @@ from ce_engine.toolchain import (
     run_ty_check,
 )
 
-# Singleton LLM client -- created once at module level to preserve connection pool
-_llm = ChatAnthropic(model_name=settings.model_name)
+# Lazy LLM singleton -- created once on first call to preserve connection pool
+_llm: ChatAnthropic | None = None
+
+
+def _get_llm() -> ChatAnthropic:
+    """Lazily initialize the LLM client."""
+    global _llm
+    if _llm is None:
+        _llm = ChatAnthropic(
+            model_name=settings.model_name,
+            timeout=60.0,  # read timeout; connect uses httpx default
+        )
+    return _llm
 
 
 def _parse_intent(response_text: str) -> WorkIntent:
@@ -69,21 +83,20 @@ async def prefetch_node(state: WorkState) -> dict:
     Runs ruff and ty concurrently via anyio.TaskGroup for 30-50% time reduction.
     """
     # Run ruff and ty checks concurrently
+    results: list[list[RuffError] | str] = []
+
+    async def _run_ruff() -> None:
+        results.append(await run_ruff_check("."))
+
+    async def _run_ty() -> None:
+        results.append(await run_ty_check("."))
+
     async with anyio.create_task_group() as tg:
-
-        async def _run_ruff() -> None:
-            nonlocal ruff_errors, ty_output
-            ruff_errors = await run_ruff_check(".")
-
-        async def _run_ty() -> None:
-            nonlocal ruff_errors, ty_output
-            ty_output = await run_ty_check(".")
-
-        ruff_errors: list[RuffError] = []
-        ty_output: str = ""
-
         tg.start_soon(_run_ruff)
         tg.start_soon(_run_ty)
+
+    ruff_errors: list[RuffError] = cast("list[RuffError]", results[0])
+    ty_output: str = cast("str", results[1])
 
     error_count = len(ruff_errors)
     ty_status = ty_output if ty_output else "clean"
@@ -93,22 +106,30 @@ async def prefetch_node(state: WorkState) -> dict:
         else "No errors found."
     )
 
-    # Read the two most recent files in learnings/
-    learnings_dir = settings.learnings_path
-    if learnings_dir.exists():
-        recent = sorted(learnings_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)[
-            :2
-        ]
-        relevant_learnings = "\n".join(p.read_text()[:500] for p in recent) if recent else ""
-    else:
-        relevant_learnings = ""
+    # Read the two most recent files in learnings/ (non-blocking)
+    def _read_learnings() -> str:
+        learnings_dir = settings.learnings_path
+        if not learnings_dir.exists():
+            return ""
+        recent = sorted(
+            learnings_dir.glob("*.md"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )[:2]
+        return "\n".join(p.read_text()[:500] for p in recent) if recent else ""
+
+    relevant_learnings = await asyncio.to_thread(_read_learnings)
 
     # Get current git branch
-    git_result = await run_command(["git", "branch", "--show-current"], timeout=30.0)
+    git_result = await run_command(
+        ["git", "branch", "--show-current"], timeout=settings.git_timeout
+    )
     git_branch = git_result.stdout.strip() or "unknown"
 
     # Get list of changed files
-    diff_result = await run_command(["git", "diff", "--name-only", "HEAD"], timeout=30.0)
+    diff_result = await run_command(
+        ["git", "diff", "--name-only", "HEAD"], timeout=settings.git_timeout
+    )
     git_diff = diff_result.stdout.strip() or "none"
 
     context_pack_path = settings.context_pack_path
@@ -137,7 +158,11 @@ async def prefetch_node(state: WorkState) -> dict:
         f"  {relevant_learnings or 'None available.'}\n"
         "</relevant_learnings>\n"
     )
-    context_pack_path.write_text(context_pack_content)
+
+    def _write_context_pack() -> None:
+        context_pack_path.write_text(context_pack_content)
+
+    await asyncio.to_thread(_write_context_pack)
 
     return {
         "error_baseline": ruff_errors,
@@ -145,19 +170,27 @@ async def prefetch_node(state: WorkState) -> dict:
         "error_delta": error_delta,
         "context_pack_path": context_pack_path,
         "relevant_learnings": relevant_learnings,
+        "approved": False,
     }
 
 
-@retry(
-    retry=retry_if_exception_type(OSError),
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=10),
-    reraise=True,
-)
 async def _call_llm(prompt: str) -> str:
     """Call the LLM with exponential backoff retry (max 3 attempts)."""
-    response = await _llm.ainvoke(prompt)
-    return str(response.content)
+    result: str | None = None
+    async for attempt in AsyncRetrying(
+        retry=retry_if_exception_type((OSError, HttpxHTTPError)),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+    ):
+        with attempt:
+            response = await _get_llm().ainvoke(prompt)
+            result = str(response.content)
+    # AsyncRetrying with stop_after_attempt always yields at least once.
+    # If we reach here without result, raise to avoid returning None.
+    if result is None:
+        msg = "AsyncRetrying loop completed without result"
+        raise RuntimeError(msg)
+    return result
 
 
 async def llm_work_node(state: WorkState) -> dict:
@@ -166,8 +199,9 @@ async def llm_work_node(state: WorkState) -> dict:
     try:
         response_text = await _call_llm(prompt)
     except RetryError as e:
-        # Persistent failure after retries -- return a structured blocked intent
-        error_reason = f"LLM call failed after 3 attempts: {e}"
+        # Persistent failure after retries -- unwrap to show the underlying exception
+        last_exc = e.last_attempt.exception() if e.last_attempt else e
+        error_reason = f"LLM call failed after 3 attempts: {type(last_exc).__name__}: {last_exc}"
         return {
             "llm_response": None,
             "work_intent": WorkIntent(
@@ -207,10 +241,14 @@ async def human_interrupt_node(state: WorkState) -> dict:
             "iteration": state.iteration,
         }
     )
-    # Append the human's decision to the Context Pack
+    # Append the human's decision to the Context Pack (non-blocking)
     pack_path = Path(state.context_pack_path)
-    existing = pack_path.read_text()
-    pack_path.write_text(existing + f"\n<human_decision>\n  {response}\n</human_decision>\n")
+
+    def _append_decision() -> None:
+        existing = pack_path.read_text()
+        pack_path.write_text(existing + f"\n<human_decision>\n  {response}\n</human_decision>\n")
+
+    await asyncio.to_thread(_append_decision)
     return {"work_intent": make_continue_intent()}
 
 
@@ -260,10 +298,17 @@ async def plan_gap_node(state: WorkState) -> dict:
     intent = state.work_intent or make_continue_intent()
     gap_path = settings.plan_gaps_path
     gap_path.parent.mkdir(parents=True, exist_ok=True)
-    existing = gap_path.read_text() if gap_path.exists() else ""
-    gap_path.write_text(
-        existing + f"\n## Gap found in iteration {state.iteration}\n" + f"{intent.description}\n"
-    )
+
+    def _write_gap() -> None:
+        existing = gap_path.read_text() if gap_path.exists() else ""
+        gap_path.write_text(
+            existing
+            + f"\n## Gap found in iteration {state.iteration}\n"
+            + f"{intent.description}\n"
+        )
+
+    await asyncio.to_thread(_write_gap)
+
     response = interrupt(
         value={
             "type": "plan_gap",
