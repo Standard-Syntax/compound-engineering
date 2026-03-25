@@ -1,7 +1,7 @@
 import json
 import subprocess
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 from tenacity import retry, stop_after_attempt, wait_exponential, RetryError
 
