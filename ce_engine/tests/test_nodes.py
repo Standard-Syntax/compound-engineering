@@ -1,9 +1,15 @@
 """Tests for ce_engine.nodes intent parsing and CLI input validation."""
 
+import asyncio
+import random
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 
 from ce_engine.cli import _validate_plan_ref, _validate_task_description
-from ce_engine.nodes import _parse_intent
+from ce_engine.nodes import _parse_intent, prefetch_node
+from ce_engine.state import RuffError, WorkState
 
 
 class TestParseIntent:
@@ -48,13 +54,15 @@ class TestParseIntent:
 
 
 class TestValidatePlanRef:
-    def test_valid_relative_path(self, tmp_path: pytest.TempPathFactory) -> None:
+    def test_valid_relative_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.chdir(tmp_path)
         plan_file = tmp_path / "plan.md"
         plan_file.write_text("# Plan")
         result = _validate_plan_ref("plan.md")
         assert result.name == "plan.md"
 
-    def test_valid_subdirectory_path(self, tmp_path: pytest.TempPathFactory) -> None:
+    def test_valid_subdirectory_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.chdir(tmp_path)
         subdir = tmp_path / "sub"
         subdir.mkdir()
         plan_file = subdir / "plan.md"
@@ -81,3 +89,45 @@ class TestValidateTaskDescription:
         task = "x" * 1001
         with pytest.raises(SystemExit):
             _validate_task_description(task)
+
+
+class TestPrefetchConcurrentRace:
+    """Tests that prefetch_node handles concurrent ruff+ty without type swap."""
+
+    @pytest.mark.asyncio
+    async def test_prefetch_concurrent_race(self, tmp_path: Path) -> None:
+        """Verify ruff_errors is always a list and ty_output is always a string.
+
+        Runs 10 times with random delays to catch any ordering assumptions.
+        """
+
+        async def mock_ruff(path: str) -> list[RuffError]:
+            await asyncio.sleep(random.uniform(0.001, 0.01))
+            return [RuffError(file="a.py", line=1, col=0, code="E501", message="")]
+
+        async def mock_ty(path: str) -> str:
+            await asyncio.sleep(random.uniform(0.001, 0.01))
+            return ""
+
+        async def mock_run_command(cmd: list[str], *, timeout: float = 30.0):
+            return type("R", (), {"returncode": 0, "stdout": b"", "stderr": b""})()
+
+        for i in range(10):
+            with (
+                patch("ce_engine.nodes.run_ruff_check", mock_ruff),
+                patch("ce_engine.nodes.run_ty_check", mock_ty),
+                patch("ce_engine.nodes.run_command", mock_run_command),
+            ):
+                state = WorkState(
+                    task_description="test",
+                    plan_ref="plan.md",
+                )
+                result = await prefetch_node(state)
+
+            # ruff_errors must always be a list
+            assert isinstance(result["error_current"], list), (
+                f"run {i}: error_current is {type(result['error_current'])}, expected list"
+            )
+            # ty_output must always be a string (or absent, defaulting to "")
+            ty_out = result.get("ty_output", "")
+            assert isinstance(ty_out, str), f"run {i}: ty_output is {type(ty_out)}, expected str"

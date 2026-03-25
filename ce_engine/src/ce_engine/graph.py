@@ -39,6 +39,8 @@ def _route_intent(state: WorkState) -> str:
             return "validate_node"
         case "blocked":
             return "human_interrupt_node"
+        case "risky_operation":
+            return "risky_op_interrupt_node"
         case "plan_gap":
             return "plan_gap_node"
         case _:
@@ -52,9 +54,7 @@ def _route_after_risky_op(state: WorkState) -> str:
 
 def _route_validate(state: WorkState) -> str:
     """Route to the work loop when tests failed, otherwise terminate."""
-    if "failing test" in state.task_description.lower():
-        return "llm_work_node"
-    return "END"
+    return "llm_work_node" if "tests failed" in state.error_delta.lower() else "END"
 
 
 def build_work_graph() -> CompiledStateGraph:

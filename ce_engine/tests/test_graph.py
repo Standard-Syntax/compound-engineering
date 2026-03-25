@@ -64,9 +64,7 @@ class TestRouteIntent:
         )
         assert _route_intent(state) == "human_interrupt_node"
 
-    def test_risky_operation_routes_to_error_compact(self) -> None:
-        # risky_operation is dead code -- the operation is never executed.
-        # Falls through to the default case which routes to error_compact_node.
+    def test_risky_operation_routes_to_interrupt_node(self) -> None:
         state = self._make_state(
             work_intent=WorkIntent(
                 intent="risky_operation",
@@ -77,7 +75,7 @@ class TestRouteIntent:
                 description=None,
             )
         )
-        assert _route_intent(state) == "error_compact_node"
+        assert _route_intent(state) == "risky_op_interrupt_node"
 
     def test_plan_gap_routes_to_plan_gap_node(self) -> None:
         state = self._make_state(
@@ -113,7 +111,6 @@ class TestRouteAfterRiskyOp:
             work_intent=None,
             llm_response=None,
             approved=approved,
-            session_id="test-session",
         )
 
     def test_approved_routes_to_llm_work_node(self) -> None:
@@ -124,16 +121,16 @@ class TestRouteAfterRiskyOp:
 
 
 class TestRouteValidate:
-    def _make_state(self, task_description: str) -> WorkState:
+    def _make_state(self, error_delta: str) -> WorkState:
         return WorkState(
-            task_description=task_description,
+            task_description="Add feature X",
             plan_ref="plan.md",
             iteration=1,
             max_iterations=5,
             tool_call_budget=10,
             error_baseline=[],
             error_current=[],
-            error_delta="",
+            error_delta=error_delta,
             context_pack_path=".context/compound-engineering/context-pack.md",
             relevant_learnings="",
             work_intent=None,
@@ -141,11 +138,14 @@ class TestRouteValidate:
             approved=False,
         )
 
-    def test_fix_failing_tests_continues(self) -> None:
-        assert _route_validate(self._make_state("Fix failing tests")) == "llm_work_node"
+    def test_tests_failed_continues(self) -> None:
+        assert (
+            _route_validate(self._make_state("Tests failed. Fix failing tests before continuing."))
+            == "llm_work_node"
+        )
 
-    def test_other_task_ends(self) -> None:
-        assert _route_validate(self._make_state("Add feature X")) == "END"
+    def test_other_delta_ends(self) -> None:
+        assert _route_validate(self._make_state("Final: 0 ruff errors. ty: clean")) == "END"
 
 
 class TestBuildWorkGraph:

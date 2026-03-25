@@ -40,9 +40,11 @@ async def run_command(cmd: list[str], timeout: float = 30.0) -> CommandResult:
                 stdout=result.stdout.decode(),
                 stderr=result.stderr.decode(),
             )
-    # Use BaseException (not TimeoutError) to catch ExceptionGroup-wrapped
-    # TimeoutError that Python 3.11+ can raise inside TaskGroup.cancel().
-    except BaseException:
+    # Use BaseException to catch ExceptionGroup-wrapped TimeoutError from
+    # anyio's cancel scope. Never silently swallow fatal exceptions.
+    except BaseException as exc:
+        if isinstance(exc, (KeyboardInterrupt, SystemExit, GeneratorExit)):
+            raise  # Never silently swallow fatal exceptions
         return CommandResult(returncode=124, stdout="", stderr="Command timed out")
 
 
@@ -112,11 +114,11 @@ def compute_error_delta(baseline: list[RuffError], current: list[RuffError]) -> 
     Returns:
         A delta description string.
     """
-    baseline_count = len(baseline)
-    current_count = len(current)
-    resolved = baseline_count - current_count
-
-    if resolved >= 0:
-        return f"{resolved} of {baseline_count} ruff errors resolved. {current_count} remaining."
-    else:
-        return f"{abs(resolved)} new ruff errors introduced. {current_count} total."
+    baseline_keys = {(e.file, e.line, e.code) for e in baseline}
+    current_keys = {(e.file, e.line, e.code) for e in current}
+    resolved = baseline_keys - current_keys
+    introduced = current_keys - baseline_keys
+    return (
+        f"{len(resolved)} errors resolved, {len(introduced)} new errors introduced. "
+        f"{len(current)} total remaining."
+    )
