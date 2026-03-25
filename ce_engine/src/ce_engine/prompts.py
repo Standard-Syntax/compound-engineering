@@ -1,3 +1,5 @@
+"""Prompt templates for the CE work engine."""
+
 from ce_engine.state import WorkState
 
 
@@ -5,16 +7,16 @@ def build_work_prompt(state: WorkState) -> str:
     """Build the prompt string for the llm_work_node."""
     return (
         f"You are implementing the following task:\n\n"
-        f"TASK: {state['task_description']}\n\n"
-        f"This is iteration {state['iteration']} of a maximum of "
-        f"{state['max_iterations']}.\n"
-        f"You have a budget of {state['tool_call_budget']} tool calls "
+        f"TASK: {state.task_description}\n\n"
+        f"This is iteration {state.iteration} of a maximum of "
+        f"{state.max_iterations}.\n"
+        f"You have a budget of {state.tool_call_budget} tool calls "
         f"for this iteration.\n\n"
-        f"Read {state['context_pack_path']} before making any changes.\n\n"
+        f"Read {state.context_pack_path} before making any changes.\n\n"
         f"Current error state (changes from baseline):\n"
-        f"{state['error_delta']}\n\n"
+        f"{state.error_delta}\n\n"
         f"Relevant past learnings:\n"
-        f"{state['relevant_learnings'] or 'None available.'}\n\n"
+        f"{state.relevant_learnings or 'None available.'}\n\n"
         "These operations require human approval before you execute them:\n"
         "- Any `uv add` or `uv remove` command\n"
         "- Any file deletion\n"
