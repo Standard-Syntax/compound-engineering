@@ -9,6 +9,7 @@ import sys
 import uuid
 from pathlib import Path
 
+import anyio
 from langgraph.types import Command, RunnableConfig
 
 from ce_engine.config import settings
@@ -193,8 +194,6 @@ def main() -> None:
     task = _validate_task_description(sys.argv[1])
     plan_ref = str(_validate_plan_ref(sys.argv[2]))
     session_id = sys.argv[3] if len(sys.argv) > 3 else None
-
-    import anyio
 
     anyio.run(_run_work, task, plan_ref, session_id)
 

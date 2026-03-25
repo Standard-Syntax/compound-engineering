@@ -284,6 +284,7 @@ async def validate_node(state: WorkState) -> dict:
                 f"pytest output:\n{pytest_result.stdout}\n{pytest_result.stderr}"
             ),
             "work_intent": make_continue_intent(),
+            "task_description": "Fix failing tests",
         }
 
     final_delta = f"Final: {len(final_errors)} ruff errors. ty: {ty_status}"
