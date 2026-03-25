@@ -1,9 +1,61 @@
+import logging
 import sys
 import uuid
+from pathlib import Path
 from langgraph.types import Command, RunnableConfig
 
 from ce_engine.graph import build_work_graph
 from ce_engine.state import WorkState
+
+_MAX_TASK_LENGTH = 1000
+
+
+def _validate_plan_ref(plan_ref: str) -> Path:
+    """Validate plan_ref is a safe local path within cwd.
+
+    Args:
+        plan_ref: The path to validate.
+
+    Returns:
+        The resolved Path if valid.
+
+    Raises:
+        SystemExit: If the path is invalid (contains .., resolves outside cwd, etc.)
+    """
+    # Reject paths containing .. components (path traversal attempt)
+    if ".." in Path(plan_ref).parts:
+        print(f"ERROR: plan_ref must not contain '..' path traversal components: {plan_ref}")
+        sys.exit(1)
+
+    resolved = Path(plan_ref).resolve()
+
+    # Ensure the resolved path is within the current working directory
+    try:
+        resolved.relative_to(Path.cwd())
+    except ValueError:
+        print(f"ERROR: plan_ref must resolve to a path within the current working directory: {plan_ref}")
+        print(f"Resolved path: {resolved}")
+        sys.exit(1)
+
+    return resolved
+
+
+def _validate_task_description(task: str) -> str:
+    """Validate task_description length is within bounds.
+
+    Args:
+        task: The task description to validate.
+
+    Returns:
+        The task description if valid.
+
+    Raises:
+        SystemExit: If the task description exceeds max length.
+    """
+    if len(task) > _MAX_TASK_LENGTH:
+        print(f"ERROR: task_description exceeds maximum length of {_MAX_TASK_LENGTH} characters: {len(task)} given")
+        sys.exit(1)
+    return task
 
 
 def _print_usage() -> None:
@@ -102,6 +154,9 @@ def run_work(task: str, plan_ref: str, session_id: str | None = None) -> None:
             # No interrupt — graph has completed
             break
         interrupt_data = interrupts[0].value if hasattr(interrupts[0], "value") else interrupts[0]
+        if not isinstance(interrupt_data, dict):
+            logging.warning("Unexpected interrupt value type: %s", type(interrupt_data))
+            interrupt_data = {"type": "unknown", "data": str(interrupt_data)[:200]}
         response = _handle_interrupt(interrupt_data)
         result = graph.invoke(Command(resume=response), config)
 
@@ -116,8 +171,8 @@ def main() -> None:
         _print_usage()
         sys.exit(0)
 
-    task = sys.argv[1]
-    plan_ref = sys.argv[2]
+    task = _validate_task_description(sys.argv[1])
+    plan_ref = str(_validate_plan_ref(sys.argv[2]))
     session_id = sys.argv[3] if len(sys.argv) > 3 else None
 
     run_work(task, plan_ref, session_id)

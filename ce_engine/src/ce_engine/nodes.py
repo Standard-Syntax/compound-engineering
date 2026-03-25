@@ -1,7 +1,9 @@
 import json
 import subprocess
 from pathlib import Path
-from typing import Literal, cast
+from typing import cast
+
+from tenacity import retry, stop_after_attempt, wait_exponential, RetryError
 
 from langchain_anthropic import ChatAnthropic
 from langgraph.types import interrupt
@@ -9,36 +11,45 @@ from langgraph.types import interrupt
 from ce_engine.prompts import build_work_prompt
 from ce_engine.state import WorkIntent, WorkState
 
-_EMPTY_INTENT: WorkIntent = {
-    "intent": "continue",
-    "reason": None,
-    "options": None,
-    "operation": None,
-    "files": None,
-    "description": None,
-}
+
+def _run_command(cmd: list[str], timeout: int = 30) -> tuple[int, str, str]:
+    """Run a command with a timeout, returning (returncode, stdout, stderr)."""
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return (result.returncode, result.stdout, result.stderr)
+    except subprocess.TimeoutExpired:
+        return (124, "", "Command timed out")
+
+
+def _make_empty_intent() -> WorkIntent:
+    return WorkIntent(
+        intent="continue",
+        reason=None,
+        options=None,
+        operation=None,
+        files=None,
+        description=None,
+    )
 
 
 def prefetch_node(state: WorkState) -> WorkState:
     """Run all tools and build the Context Pack before any LLM call."""
-    ruff_result = subprocess.run(
+    ruff_returncode, ruff_stdout, ruff_stderr = _run_command(
         ["ruff", "check", "--output-format=json", "."],
-        capture_output=True,
-        text=True,
+        timeout=30,
     )
     try:
         ruff_errors = (
-            json.loads(ruff_result.stdout) if ruff_result.stdout.strip() else []
+            json.loads(ruff_stdout) if ruff_stdout.strip() else []
         )
     except json.JSONDecodeError:
         ruff_errors = []
 
-    ty_result = subprocess.run(
+    ty_returncode, ty_stdout, ty_stderr = _run_command(
         ["ty", "check", "."],
-        capture_output=True,
-        text=True,
+        timeout=30,
     )
-    ty_errors = ty_result.stdout.strip()
+    ty_errors = ty_stdout.strip()
 
     error_count = len(ruff_errors)
     error_delta = (
@@ -56,16 +67,12 @@ def prefetch_node(state: WorkState) -> WorkState:
         relevant_learnings = ""
 
     # Get current git branch
-    git_branch = subprocess.run(
-        ["git", "branch", "--show-current"],
-        capture_output=True, text=True,
-    ).stdout.strip() or "unknown"
+    _, git_branch_stdout, _ = _run_command(["git", "branch", "--show-current"], timeout=30)
+    git_branch = git_branch_stdout.strip() or "unknown"
 
     # Get list of changed files
-    git_diff = subprocess.run(
-        ["git", "diff", "--name-only", "HEAD"],
-        capture_output=True, text=True,
-    ).stdout.strip() or "none"
+    _, git_diff_stdout, _ = _run_command(["git", "diff", "--name-only", "HEAD"], timeout=30)
+    git_diff = git_diff_stdout.strip() or "none"
 
     context_pack_path = ".context/compound-engineering/context-pack.md"
     Path(context_pack_path).parent.mkdir(parents=True, exist_ok=True)
@@ -105,12 +112,39 @@ def prefetch_node(state: WorkState) -> WorkState:
     })
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    reraise=True,
+)
+def _call_llm(prompt: str) -> str:
+    """Call the LLM with exponential backoff retry (max 3 attempts)."""
+    model = ChatAnthropic(model_name="claude-sonnet-4-20250514")
+    response = model.invoke(prompt)
+    return str(response.content)
+
+
 def llm_work_node(state: WorkState) -> WorkState:
     """Call the LLM to perform one iteration of work."""
     prompt = build_work_prompt(state)
-    model = ChatAnthropic(model_name="claude-sonnet-4-6")
-    response = model.invoke(prompt)
-    response_text = str(response.content)
+    try:
+        response_text = _call_llm(prompt)
+    except RetryError as e:
+        # Persistent failure after retries — return a structured blocked intent
+        error_reason = f"LLM call failed after 3 attempts: {e}"
+        return cast(WorkState, {
+            **state,
+            "llm_response": None,
+            "work_intent": {
+                "intent": "blocked",
+                "reason": error_reason,
+                "options": None,
+                "operation": None,
+                "files": None,
+                "description": None,
+            },
+            "iteration": state["iteration"] + 1,
+        })
 
     # The LLM is instructed to put a JSON intent on the final line.
     lines = response_text.strip().split("\n")
@@ -139,14 +173,13 @@ def llm_work_node(state: WorkState) -> WorkState:
 
 def error_compact_node(state: WorkState) -> WorkState:
     """Re-run ruff, compute the delta from baseline, and update state."""
-    ruff_result = subprocess.run(
+    ruff_returncode, ruff_stdout, ruff_stderr = _run_command(
         ["ruff", "check", "--output-format=json", "."],
-        capture_output=True,
-        text=True,
+        timeout=30,
     )
     try:
         current_errors = (
-            json.loads(ruff_result.stdout) if ruff_result.stdout.strip() else []
+            json.loads(ruff_stdout) if ruff_stdout.strip() else []
         )
     except json.JSONDecodeError:
         current_errors = []
@@ -171,7 +204,7 @@ def error_compact_node(state: WorkState) -> WorkState:
 
 def human_interrupt_node(state: WorkState) -> WorkState:
     """Pause and ask the human to resolve a blocking question."""
-    intent = state["work_intent"] or _EMPTY_INTENT
+    intent = state["work_intent"] or _make_empty_intent()
     response = interrupt(value={
         "type": "blocked",
         "reason": intent["reason"],
@@ -185,12 +218,12 @@ def human_interrupt_node(state: WorkState) -> WorkState:
     pack_path.write_text(
         existing + f"\n<human_decision>\n  {response}\n</human_decision>\n"
     )
-    return cast(WorkState, {**state, "work_intent": _EMPTY_INTENT})
+    return cast(WorkState, {**state, "work_intent": _make_empty_intent()})
 
 
 def risky_op_interrupt_node(state: WorkState) -> WorkState:
     """Pause and ask the human to approve a potentially destructive operation."""
-    intent = state["work_intent"] or _EMPTY_INTENT
+    intent = state["work_intent"] or _make_empty_intent()
     response = interrupt(value={
         "type": "risky_operation",
         "operation": intent["operation"],
@@ -204,46 +237,37 @@ def risky_op_interrupt_node(state: WorkState) -> WorkState:
 
 def validate_node(state: WorkState) -> WorkState:
     """Run final toolchain checks after the LLM declares the work done."""
-    ruff_result = subprocess.run(
+    ruff_returncode, ruff_stdout, ruff_stderr = _run_command(
         ["ruff", "check", "--output-format=json", "."],
-        capture_output=True,
-        text=True,
+        timeout=30,
     )
     try:
         final_errors = (
-            json.loads(ruff_result.stdout) if ruff_result.stdout.strip() else []
+            json.loads(ruff_stdout) if ruff_stdout.strip() else []
         )
     except json.JSONDecodeError:
         final_errors = []
 
-    ty_result = subprocess.run(
+    ty_returncode, ty_stdout, ty_stderr = _run_command(
         ["ty", "check", "."],
-        capture_output=True,
-        text=True,
+        timeout=30,
     )
-    ty_status = "clean" if not ty_result.returncode else ty_result.stdout.strip()
+    ty_status = "clean" if not ty_returncode else ty_stdout.strip()
 
-    pytest_result = subprocess.run(
+    pytest_returncode, pytest_stdout, pytest_stderr = _run_command(
         ["uv", "run", "pytest", "--tb=short", "-q"],
-        capture_output=True, text=True,
+        timeout=120,
     )
-    if pytest_result.returncode != 0:
+    if pytest_returncode != 0:
         # Tests failed — signal the work loop to continue fixing
         return cast(WorkState, {
             **state,
             "error_current": final_errors,
             "error_delta": (
                 f"Tests failed. Fix failing tests before continuing.\n"
-                f"pytest output:\n{pytest_result.stdout}\n{pytest_result.stderr}"
+                f"pytest output:\n{pytest_stdout}\n{pytest_stderr}"
             ),
-            "work_intent": {
-                "intent": "continue",
-                "reason": None,
-                "options": None,
-                "operation": None,
-                "files": None,
-                "description": None,
-            },
+            "work_intent": _make_empty_intent(),
             "task_description": "Fix failing tests",
         })
 
@@ -256,7 +280,7 @@ def validate_node(state: WorkState) -> WorkState:
 
 def plan_gap_node(state: WorkState) -> WorkState:
     """Record a plan gap and ask the human whether to include it or defer."""
-    intent = state["work_intent"] or _EMPTY_INTENT
+    intent = state["work_intent"] or _make_empty_intent()
     gap_path = Path(".context/compound-engineering/plan-gaps.md")
     gap_path.parent.mkdir(parents=True, exist_ok=True)
     existing = gap_path.read_text() if gap_path.exists() else ""
@@ -271,7 +295,7 @@ def plan_gap_node(state: WorkState) -> WorkState:
         "options": ["include in this work", "defer to next plan"],
     })
     if str(response).lower().startswith("include"):
-        return cast(WorkState, {**state, "work_intent": _EMPTY_INTENT})
+        return cast(WorkState, {**state, "work_intent": _make_empty_intent()})
     # User deferred — treat as done
     return cast(WorkState, {
         **state,

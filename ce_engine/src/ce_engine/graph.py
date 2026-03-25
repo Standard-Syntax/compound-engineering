@@ -1,4 +1,4 @@
-from typing import Any, cast
+from typing import cast
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph

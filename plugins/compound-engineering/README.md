@@ -126,6 +126,9 @@ Core workflow commands use `ce:` prefix to unambiguously identify them as compou
 | `claude-permissions-optimizer` | Optimize Claude Code permissions from session history |
 | `resolve-pr-parallel` | Resolve PR review comments in parallel |
 | `setup` | Configure which review agents run for your project |
+| `scaffold` | Generate a new Python 3.13 project skeleton |
+| `retrospect` | Analyze learnings from the past two weeks and surface patterns |
+| `calibrate` | Record estimation accuracy for iteration planning |
 
 ### Multi-Agent Orchestration
 
