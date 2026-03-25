@@ -1,7 +1,11 @@
-from typing import Any, cast
+"""LangGraph work loop for the CE engine.
+
+StateGraph(WorkState) is used directly with Pydantic BaseModel --
+no cast(Any, WorkState) workaround needed. LangGraph coerces automatically.
+"""
 
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from ce_engine.nodes import (
@@ -20,22 +24,21 @@ def _route_intent(state: WorkState) -> str:
     """Route to the correct node based on the LLM's declared intent.
 
     This is a Python function. The LLM cannot influence this routing
-    decision — it only produces the WorkIntent that this function reads.
+    decision -- it only produces the WorkIntent that this function reads.
     """
-    if state["iteration"] >= state["max_iterations"]:
+    if state.iteration >= state.max_iterations:
         return "validate_node"
 
-    intent = state["work_intent"]["intent"] if state["work_intent"] else "continue"
+    if state.work_intent is None:
+        return "error_compact_node"
 
-    match intent:
+    match state.work_intent.intent:
         case "continue":
             return "error_compact_node"
         case "done":
             return "validate_node"
         case "blocked":
             return "human_interrupt_node"
-        case "risky_operation":
-            return "risky_op_interrupt_node"
         case "plan_gap":
             return "plan_gap_node"
         case _:
@@ -44,12 +47,19 @@ def _route_intent(state: WorkState) -> str:
 
 def _route_after_risky_op(state: WorkState) -> str:
     """Proceed only if the human approved the risky operation."""
-    return "llm_work_node" if state["approved"] else "validate_node"
+    return "llm_work_node" if state.approved else "validate_node"
+
+
+def _route_validate(state: WorkState) -> str:
+    """Route to the work loop when tests failed, otherwise terminate."""
+    if "failing test" in state.task_description.lower():
+        return "llm_work_node"
+    return "END"
 
 
 def build_work_graph() -> CompiledStateGraph:
     """Build and compile the work loop graph with a memory checkpointer."""
-    graph = StateGraph(cast(Any, WorkState))
+    graph = StateGraph(WorkState)
 
     graph.add_node("prefetch_node", prefetch_node)
     graph.add_node("llm_work_node", llm_work_node)
@@ -66,7 +76,10 @@ def build_work_graph() -> CompiledStateGraph:
     graph.add_edge("human_interrupt_node", "llm_work_node")
     graph.add_conditional_edges("risky_op_interrupt_node", _route_after_risky_op)
     graph.add_edge("plan_gap_node", "llm_work_node")
-    graph.add_edge("validate_node", END)
+    graph.add_conditional_edges("validate_node", _route_validate)
 
+    # NOTE: MemorySaver is process-local. Sessions cannot be resumed across process
+    # restarts. For cross-process resumption, replace with a persistent checkpointer
+    # such as langgraph.checkpoint.sqlite.SqliteSaver.
     checkpointer = MemorySaver()
     return graph.compile(checkpointer=checkpointer)

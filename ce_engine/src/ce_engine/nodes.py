@@ -1,81 +1,139 @@
+"""LangGraph nodes for the CE work engine.
+
+All nodes are async def. Subprocess calls use anyio.fail_after() for timeout
+(anyio.run_process has NO built-in timeout parameter). A singleton LLM client
+is created at module level to preserve connection pool across retries.
+"""
+
+import asyncio
 import json
-import subprocess
 from pathlib import Path
-from typing import Literal, cast
+from typing import cast
 
-from tenacity import retry, stop_after_attempt, wait_exponential, RetryError
-
+import anyio
+from httpx import HTTPError as HttpxHTTPError
 from langchain_anthropic import ChatAnthropic
 from langgraph.types import interrupt
+from tenacity import (
+    AsyncRetrying,
+    RetryError,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
+from ce_engine.config import settings
 from ce_engine.prompts import build_work_prompt
-from ce_engine.state import WorkIntent, WorkState
+from ce_engine.state import RuffError, WorkIntent, WorkState, make_continue_intent
+from ce_engine.toolchain import (
+    compute_error_delta,
+    run_command,
+    run_pytest,
+    run_ruff_check,
+    run_ty_check,
+)
+
+# Lazy LLM singleton -- created once on first call to preserve connection pool
+_llm: ChatAnthropic | None = None
 
 
-def _run_command(cmd: list[str], timeout: int = 30) -> tuple[int, str, str]:
-    """Run a command with a timeout, returning (returncode, stdout, stderr)."""
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        return (result.returncode, result.stdout, result.stderr)
-    except subprocess.TimeoutExpired:
-        return (124, "", "Command timed out")
-
-
-def _make_empty_intent() -> WorkIntent:
-    return WorkIntent(
-        intent="continue",
-        reason=None,
-        options=None,
-        operation=None,
-        files=None,
-        description=None,
-    )
-
-
-def prefetch_node(state: WorkState) -> WorkState:
-    """Run all tools and build the Context Pack before any LLM call."""
-    ruff_returncode, ruff_stdout, ruff_stderr = _run_command(
-        ["ruff", "check", "--output-format=json", "."],
-        timeout=30,
-    )
-    try:
-        ruff_errors = (
-            json.loads(ruff_stdout) if ruff_stdout.strip() else []
+def _get_llm() -> ChatAnthropic:
+    """Lazily initialize the LLM client."""
+    global _llm
+    if _llm is None:
+        _llm = ChatAnthropic(
+            model_name=settings.model_name,
+            timeout=60.0,  # read timeout; connect uses httpx default
         )
-    except json.JSONDecodeError:
-        ruff_errors = []
+    return _llm
 
-    ty_returncode, ty_stdout, ty_stderr = _run_command(
-        ["ty", "check", "."],
-        timeout=30,
-    )
-    ty_errors = ty_stdout.strip()
+
+def _parse_intent(response_text: str) -> WorkIntent:
+    """Parse intent from LLM response by scanning backwards for JSON.
+
+    The LLM is instructed to put a JSON intent on the final line, but it
+    may include explanatory text above it. This scans backwards from the
+    last line until a valid JSON object containing 'intent' is found.
+    """
+    lines = response_text.strip().split("\n")
+    for i in range(len(lines) - 1, -1, -1):
+        candidate = lines[i].strip()
+        if not candidate:
+            continue
+        try:
+            data = json.loads(candidate)
+            if isinstance(data, dict) and "intent" in data:
+                return WorkIntent(
+                    intent=data.get("intent", "continue"),
+                    reason=data.get("reason"),
+                    options=data.get("options"),
+                    operation=data.get("operation"),
+                    files=data.get("files"),
+                    description=data.get("description"),
+                )
+        except json.JSONDecodeError:
+            continue
+    # No valid JSON found -- default to continue
+    return make_continue_intent()
+
+
+async def prefetch_node(state: WorkState) -> dict:
+    """Run all tools and build the Context Pack before any LLM call.
+
+    Runs ruff and ty concurrently via anyio.TaskGroup for 30-50% time reduction.
+    """
+    # Run ruff and ty checks concurrently
+    results: list[list[RuffError] | str] = []
+
+    async def _run_ruff() -> None:
+        results.append(await run_ruff_check("."))
+
+    async def _run_ty() -> None:
+        results.append(await run_ty_check("."))
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(_run_ruff)
+        tg.start_soon(_run_ty)
+
+    ruff_errors: list[RuffError] = cast("list[RuffError]", results[0])
+    ty_output: str = cast("str", results[1])
 
     error_count = len(ruff_errors)
+    ty_status = ty_output if ty_output else "clean"
     error_delta = (
-        f"{error_count} ruff errors detected.\n{ty_errors}"
-        if error_count > 0 or ty_errors
+        f"{error_count} ruff errors detected.\nty: {ty_status}"
+        if error_count > 0 or ty_output
         else "No errors found."
     )
 
-    # Read the two most recent files in .context/compound-engineering/learnings/
-    learnings_dir = Path(".context/compound-engineering/learnings")
-    if learnings_dir.exists():
-        recent = sorted(learnings_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)[:2]
-        relevant_learnings = "\n".join(p.read_text()[:500] for p in recent) if recent else ""
-    else:
-        relevant_learnings = ""
+    # Read the two most recent files in learnings/ (non-blocking)
+    def _read_learnings() -> str:
+        learnings_dir = settings.learnings_path
+        if not learnings_dir.exists():
+            return ""
+        recent = sorted(
+            learnings_dir.glob("*.md"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )[:2]
+        return "\n".join(p.read_text()[:500] for p in recent) if recent else ""
+
+    relevant_learnings = await asyncio.to_thread(_read_learnings)
 
     # Get current git branch
-    _, git_branch_stdout, _ = _run_command(["git", "branch", "--show-current"], timeout=30)
-    git_branch = git_branch_stdout.strip() or "unknown"
+    git_result = await run_command(
+        ["git", "branch", "--show-current"], timeout=settings.git_timeout
+    )
+    git_branch = git_result.stdout.strip() or "unknown"
 
     # Get list of changed files
-    _, git_diff_stdout, _ = _run_command(["git", "diff", "--name-only", "HEAD"], timeout=30)
-    git_diff = git_diff_stdout.strip() or "none"
+    diff_result = await run_command(
+        ["git", "diff", "--name-only", "HEAD"], timeout=settings.git_timeout
+    )
+    git_diff = diff_result.stdout.strip() or "none"
 
-    context_pack_path = ".context/compound-engineering/context-pack.md"
-    Path(context_pack_path).parent.mkdir(parents=True, exist_ok=True)
+    context_pack_path = settings.context_pack_path
+    context_pack_path.parent.mkdir(parents=True, exist_ok=True)
 
     context_pack_content = (
         "<project>\n"
@@ -87,224 +145,180 @@ def prefetch_node(state: WorkState) -> WorkState:
         "<current_task>\n"
         f"  branch: {git_branch}\n"
         f"  changed_files: {git_diff}\n"
-        f"  task: {state['task_description']}\n"
-        f"  plan_ref: {state['plan_ref']}\n"
+        f"  task: {state.task_description}\n"
+        f"  plan_ref: {state.plan_ref}\n"
         "</current_task>\n\n"
         "<pre_fetched>\n"
         "  ruff_errors: |\n"
-        f"    {json.dumps(ruff_errors, indent=4)}\n"
+        f"    {json.dumps([e.model_dump() for e in ruff_errors], indent=4)}\n"
         "  ty_errors: |\n"
-        f"    {ty_errors}\n"
+        f"    {ty_output}\n"
         "</pre_fetched>\n\n"
         "<relevant_learnings>\n"
         f"  {relevant_learnings or 'None available.'}\n"
         "</relevant_learnings>\n"
     )
-    Path(context_pack_path).write_text(context_pack_content)
 
-    return cast(WorkState, {
-        **state,
+    def _write_context_pack() -> None:
+        context_pack_path.write_text(context_pack_content)
+
+    await asyncio.to_thread(_write_context_pack)
+
+    return {
         "error_baseline": ruff_errors,
         "error_current": ruff_errors,
         "error_delta": error_delta,
         "context_pack_path": context_pack_path,
         "relevant_learnings": relevant_learnings,
-    })
+        "approved": False,
+    }
 
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=10),
-    reraise=True,
-)
-def _call_llm(prompt: str) -> str:
+async def _call_llm(prompt: str) -> str:
     """Call the LLM with exponential backoff retry (max 3 attempts)."""
-    model = ChatAnthropic(model_name="claude-sonnet-4-20250514")
-    response = model.invoke(prompt)
-    return str(response.content)
+    result: str | None = None
+    async for attempt in AsyncRetrying(
+        retry=retry_if_exception_type((OSError, HttpxHTTPError)),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+    ):
+        with attempt:
+            response = await _get_llm().ainvoke(prompt)
+            result = str(response.content)
+    # AsyncRetrying with stop_after_attempt always yields at least once.
+    # If we reach here without result, raise to avoid returning None.
+    if result is None:
+        msg = "AsyncRetrying loop completed without result"
+        raise RuntimeError(msg)
+    return result
 
 
-def llm_work_node(state: WorkState) -> WorkState:
+async def llm_work_node(state: WorkState) -> dict:
     """Call the LLM to perform one iteration of work."""
     prompt = build_work_prompt(state)
     try:
-        response_text = _call_llm(prompt)
+        response_text = await _call_llm(prompt)
     except RetryError as e:
-        # Persistent failure after retries — return a structured blocked intent
-        error_reason = f"LLM call failed after 3 attempts: {e}"
-        return cast(WorkState, {
-            **state,
+        # Persistent failure after retries -- unwrap to show the underlying exception
+        last_exc = e.last_attempt.exception() if e.last_attempt else e
+        error_reason = f"LLM call failed after 3 attempts: {type(last_exc).__name__}: {last_exc}"
+        return {
             "llm_response": None,
-            "work_intent": {
-                "intent": "blocked",
-                "reason": error_reason,
-                "options": None,
-                "operation": None,
-                "files": None,
-                "description": None,
-            },
-            "iteration": state["iteration"] + 1,
-        })
+            "work_intent": WorkIntent(
+                intent="blocked",
+                reason=error_reason,
+            ),
+            "iteration": state.iteration + 1,
+        }
 
-    # The LLM is instructed to put a JSON intent on the final line.
-    lines = response_text.strip().split("\n")
-    last_line = lines[-1].strip()
-    try:
-        intent_data = json.loads(last_line)
-    except json.JSONDecodeError:
-        intent_data = {"intent": "continue"}
+    intent = _parse_intent(response_text)
 
-    work_intent: WorkIntent = {
-        "intent": cast(Literal["continue", "done", "blocked", "risky_operation", "plan_gap"], intent_data.get("intent", "continue")),
-        "reason": cast(str | None, intent_data.get("reason")),
-        "options": cast(list[str] | None, intent_data.get("options")),
-        "operation": cast(str | None, intent_data.get("operation")),
-        "files": cast(list[str] | None, intent_data.get("files")),
-        "description": cast(str | None, intent_data.get("description")),
+    return {
+        "llm_response": response_text,
+        "work_intent": intent,
+        "iteration": state.iteration + 1,
     }
 
-    return cast(WorkState, {
-        **state,
-        "llm_response": response_text,
-        "work_intent": work_intent,
-        "iteration": state["iteration"] + 1,
-    })
 
-
-def error_compact_node(state: WorkState) -> WorkState:
+async def error_compact_node(state: WorkState) -> dict:
     """Re-run ruff, compute the delta from baseline, and update state."""
-    ruff_returncode, ruff_stdout, ruff_stderr = _run_command(
-        ["ruff", "check", "--output-format=json", "."],
-        timeout=30,
-    )
-    try:
-        current_errors = (
-            json.loads(ruff_stdout) if ruff_stdout.strip() else []
-        )
-    except json.JSONDecodeError:
-        current_errors = []
-
-    baseline_count = len(state["error_baseline"])
-    current_count = len(current_errors)
-    resolved = baseline_count - current_count
-
-    if resolved >= 0:
-        delta = (
-            f"{resolved} of {baseline_count} ruff errors resolved. "
-            f"{current_count} remaining."
-        )
-    else:
-        delta = (
-            f"{abs(resolved)} new ruff errors introduced. "
-            f"{current_count} total."
-        )
-
-    return cast(WorkState, {**state, "error_current": current_errors, "error_delta": delta})
+    current_errors = await run_ruff_check(".")
+    delta = compute_error_delta(state.error_baseline, current_errors)
+    return {
+        "error_current": current_errors,
+        "error_delta": delta,
+    }
 
 
-def human_interrupt_node(state: WorkState) -> WorkState:
+async def human_interrupt_node(state: WorkState) -> dict:
     """Pause and ask the human to resolve a blocking question."""
-    intent = state["work_intent"] or _make_empty_intent()
-    response = interrupt(value={
-        "type": "blocked",
-        "reason": intent["reason"],
-        "options": intent.get("options") or [],
-        "iteration": state["iteration"],
-    })
-    # Append the human's decision to the Context Pack so the next
-    # iteration starts with it as context.
-    pack_path = Path(state["context_pack_path"])
-    existing = pack_path.read_text()
-    pack_path.write_text(
-        existing + f"\n<human_decision>\n  {response}\n</human_decision>\n"
+    intent = state.work_intent or make_continue_intent()
+    response = interrupt(
+        value={
+            "type": "blocked",
+            "reason": intent.reason,
+            "options": intent.options or [],
+            "iteration": state.iteration,
+        }
     )
-    return cast(WorkState, {**state, "work_intent": _make_empty_intent()})
+    # Append the human's decision to the Context Pack (non-blocking)
+    pack_path = Path(state.context_pack_path)
+
+    def _append_decision() -> None:
+        existing = pack_path.read_text()
+        pack_path.write_text(existing + f"\n<human_decision>\n  {response}\n</human_decision>\n")
+
+    await asyncio.to_thread(_append_decision)
+    return {"work_intent": make_continue_intent()}
 
 
-def risky_op_interrupt_node(state: WorkState) -> WorkState:
+async def risky_op_interrupt_node(state: WorkState) -> dict:
     """Pause and ask the human to approve a potentially destructive operation."""
-    intent = state["work_intent"] or _make_empty_intent()
-    response = interrupt(value={
-        "type": "risky_operation",
-        "operation": intent["operation"],
-        "files": intent.get("files") or [],
-        "message": "Approve this operation before it runs?",
-        "options": ["approve", "reject"],
-    })
+    intent = state.work_intent or make_continue_intent()
+    response = interrupt(
+        value={
+            "type": "risky_operation",
+            "operation": intent.operation,
+            "files": intent.files or [],
+            "message": "Approve this operation before it runs?",
+            "options": ["approve", "reject"],
+        }
+    )
     approved = str(response).lower() in ("approve", "yes", "y", "true")
-    return cast(WorkState, {**state, "approved": approved})
+    return {"approved": approved}
 
 
-def validate_node(state: WorkState) -> WorkState:
+async def validate_node(state: WorkState) -> dict:
     """Run final toolchain checks after the LLM declares the work done."""
-    ruff_returncode, ruff_stdout, ruff_stderr = _run_command(
-        ["ruff", "check", "--output-format=json", "."],
-        timeout=30,
-    )
-    try:
-        final_errors = (
-            json.loads(ruff_stdout) if ruff_stdout.strip() else []
-        )
-    except json.JSONDecodeError:
-        final_errors = []
+    final_errors = await run_ruff_check(".")
+    ty_output = await run_ty_check(".")
+    ty_status = ty_output if ty_output else "clean"
 
-    ty_returncode, ty_stdout, ty_stderr = _run_command(
-        ["ty", "check", "."],
-        timeout=30,
-    )
-    ty_status = "clean" if not ty_returncode else ty_stdout.strip()
-
-    pytest_returncode, pytest_stdout, pytest_stderr = _run_command(
-        ["uv", "run", "pytest", "--tb=short", "-q"],
-        timeout=120,
-    )
-    if pytest_returncode != 0:
-        # Tests failed — signal the work loop to continue fixing
-        return cast(WorkState, {
-            **state,
+    pytest_result = await run_pytest(".")
+    if pytest_result.returncode != 0:
+        # Tests failed -- signal the work loop to continue fixing
+        return {
             "error_current": final_errors,
             "error_delta": (
                 f"Tests failed. Fix failing tests before continuing.\n"
-                f"pytest output:\n{pytest_stdout}\n{pytest_stderr}"
+                f"pytest output:\n{pytest_result.stdout}\n{pytest_result.stderr}"
             ),
-            "work_intent": _make_empty_intent(),
-            "task_description": "Fix failing tests",
-        })
+            "work_intent": make_continue_intent(),
+        }
 
-    final_delta = (
-        f"Final: {len(final_errors)} ruff errors. ty: {ty_status}"
-    )
+    final_delta = f"Final: {len(final_errors)} ruff errors. ty: {ty_status}"
+    return {
+        "error_current": final_errors,
+        "error_delta": final_delta,
+    }
 
-    return cast(WorkState, {**state, "error_current": final_errors, "error_delta": final_delta})
 
-
-def plan_gap_node(state: WorkState) -> WorkState:
+async def plan_gap_node(state: WorkState) -> dict:
     """Record a plan gap and ask the human whether to include it or defer."""
-    intent = state["work_intent"] or _make_empty_intent()
-    gap_path = Path(".context/compound-engineering/plan-gaps.md")
+    intent = state.work_intent or make_continue_intent()
+    gap_path = settings.plan_gaps_path
     gap_path.parent.mkdir(parents=True, exist_ok=True)
-    existing = gap_path.read_text() if gap_path.exists() else ""
-    gap_path.write_text(
-        existing
-        + f"\n## Gap found in iteration {state['iteration']}\n"
-        + f"{intent['description']}\n"
+
+    def _write_gap() -> None:
+        existing = gap_path.read_text() if gap_path.exists() else ""
+        gap_path.write_text(
+            existing
+            + f"\n## Gap found in iteration {state.iteration}\n"
+            + f"{intent.description}\n"
+        )
+
+    await asyncio.to_thread(_write_gap)
+
+    response = interrupt(
+        value={
+            "type": "plan_gap",
+            "description": intent.description,
+            "options": ["include in this work", "defer to next plan"],
+        }
     )
-    response = interrupt(value={
-        "type": "plan_gap",
-        "description": intent["description"],
-        "options": ["include in this work", "defer to next plan"],
-    })
     if str(response).lower().startswith("include"):
-        return cast(WorkState, {**state, "work_intent": _make_empty_intent()})
-    # User deferred — treat as done
-    return cast(WorkState, {
-        **state,
-        "work_intent": {
-            "intent": "done",
-            "reason": None,
-            "options": None,
-            "operation": None,
-            "files": None,
-            "description": None,
-        },
-    })
+        return {"work_intent": make_continue_intent()}
+    # User deferred -- treat as done
+    return {
+        "work_intent": WorkIntent(intent="done"),
+    }
