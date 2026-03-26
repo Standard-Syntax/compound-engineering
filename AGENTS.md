@@ -1,10 +1,6 @@
 # Agent Instructions
 
-This repository primarily houses the `compound-engineering` coding-agent plugin and the Claude Code marketplace/catalog metadata used to distribute it.
-
-It also contains:
-- the Bun/TypeScript CLI that converts Claude Code plugins into other agent platform formats
-- shared release and metadata infrastructure for the CLI, marketplace, and plugins
+This repository primarily houses the `compound-engineering` coding-agent plugin and the Claude Code marketplace/catalog metadata used to distribute it, along with a Python LangGraph work execution engine.
 
 `AGENTS.md` is the canonical repo instruction file. Root `CLAUDE.md` exists only as a compatibility shim for tools and conversions that still look for it.
 
@@ -22,7 +18,7 @@ uv run ty check src/
 - **Branching:** Create a feature branch for any non-trivial change. If already on the correct branch for the task, keep using it; do not create additional branches or worktrees unless explicitly requested.
 - **Safety:** Do not delete or overwrite user data. Avoid destructive commands.
 - **Testing:** Run `uv run pytest` after changes that affect parsing, conversion, or output.
-- **Release versioning:** Releases are prepared by release automation, not normal feature PRs. The repo now has multiple release components (`cli`, `compound-engineering`, `marketplace`). GitHub release PRs and GitHub Releases are the canonical release-notes surface for new releases; root `CHANGELOG.md` is only a pointer to that history. Use conventional titles such as `feat:` and `fix:` so release automation can classify change intent, but do not hand-bump release-owned versions or hand-author release notes in routine PRs.
+- **Release versioning:** Releases are prepared by release automation, not normal feature PRs. The repo has three release components (`ce_engine`, `compound-engineering`, `marketplace`). GitHub release PRs and GitHub Releases are the canonical release-notes surface for new releases; root `CHANGELOG.md` is only a pointer to that history. Use conventional titles such as `feat:` and `fix:` so release automation can classify change intent, but do not hand-bump release-owned versions or hand-author release notes in routine PRs.
 - **Output Paths:** Keep OpenCode output at `opencode.json` and `.opencode/{agents,skills,plugins}`. For OpenCode, command go to `~/.config/opencode/commands/<name>.md`; `opencode.json` is deep-merged (never overwritten wholesale).
 - **Scratch Space:** When authoring or editing skills and agents that need repo-local scratch space, instruct them to use `.context/` for ephemeral collaboration artifacts. Namespace compound-engineering workflow state under `.context/compound-engineering/<workflow-or-skill-name>/`, add a per-run subdirectory when concurrent runs are plausible, and clean scratch artifacts up after successful completion unless the user asked to inspect them or another agent still needs them. Durable outputs like plans, specs, learnings, and docs do not belong in `.context/`.
 - **ASCII-first:** Use ASCII unless the file already contains Unicode.
@@ -30,10 +26,9 @@ uv run ty check src/
 ## Directory Layout
 
 ```
-src/              CLI entry point, parsers, converters, target writers
+ce_engine/        Python work execution engine (LangGraph)
 plugins/          Plugin workspaces (compound-engineering)
 .claude-plugin/   Claude marketplace catalog metadata
-tests/            Converter, writer, and CLI tests + fixtures
 docs/             Requirements, plans, solutions, and target specs
 ```
 
@@ -43,9 +38,8 @@ Changes in this repo may affect one or more of these surfaces:
 
 - `compound-engineering` under `plugins/compound-engineering/`
 - the Claude marketplace catalog under `.claude-plugin/`
-- the converter/install CLI in `src/` and `package.json`
 
-Do not assume a repo change is "just CLI" or "just plugin" without checking which surface owns the affected files.
+Do not assume a repo change is "just plugin" without checking which surface owns the affected files.
 
 ## Plugin Maintenance
 
@@ -54,12 +48,9 @@ When changing `plugins/compound-engineering/` content:
 - Update substantive docs like `plugins/compound-engineering/README.md` when the plugin behavior, inventory, or usage changes.
 - Do not hand-bump release-owned versions in plugin or marketplace manifests.
 - Do not hand-add release entries to `CHANGELOG.md` or treat it as the canonical source for new releases.
-- Run `uv run release:validate` if agents, commands, skills, MCP servers, or release-owned descriptions/counts may have changed.
-
 Useful validation commands:
 
 ```bash
-uv run release:validate
 cat .claude-plugin/marketplace.json | jq .
 cat plugins/compound-engineering/.claude-plugin/plugin.json | jq .
 ```

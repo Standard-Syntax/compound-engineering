@@ -172,7 +172,7 @@ async def _run_work(task: str, plan_ref: str, session_id: str | None = None) -> 
             context_pack_path=settings.context_pack_path,
             relevant_learnings="",
             work_intent=None,
-            llm_response="",
+            llm_response=None,
             approved=False,
         )
         result = await graph.ainvoke(initial_state, config)
