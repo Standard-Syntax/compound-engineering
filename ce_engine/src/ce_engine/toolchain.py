@@ -4,6 +4,7 @@ All subprocess calls use anyio.fail_after() for timeout -- anyio.run_process()
 has NO built-in timeout parameter.
 """
 
+import asyncio
 import json
 from dataclasses import dataclass
 
