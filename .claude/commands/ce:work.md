@@ -45,3 +45,7 @@ To resume a paused session, pass the session ID printed at the start of the prev
 
 - Never start a work session without a plan file present.
 - Always report the session ID so the user can resume if needed.
+
+## Canonical Reference
+
+The canonical implementation is the `ce-work` skill in `plugins/compound-engineering/skills/ce-work/SKILL.md`. This command is a local development shim — the plugin skill includes additional execution modes, parallel Phase 1 research agents, auto-invoke trigger phrases, and more. See the plugin skill for the full documentation.

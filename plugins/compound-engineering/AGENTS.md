@@ -47,6 +47,12 @@ skills/
 > `/command-name` slash commands now live under `skills/command-name/SKILL.md`
 > and work identically in Claude Code. Other targets may convert or map these references differently.
 
+### Skill File Conventions
+
+All skills use the directory format (`skills/<name>/SKILL.md`). The `name` field in the skill's YAML frontmatter must match the directory name.
+
+Flat `.md` files in `skills/` are reference skills (coding standards). Directory-based `SKILL.md` files are workflow or interactive skills.
+
 ## Command Naming Convention
 
 **Workflow commands** use `ce:` prefix to unambiguously identify them as compound-engineering commands:

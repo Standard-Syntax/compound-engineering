@@ -42,3 +42,7 @@ Run a parallel multi-agent code review on all changed files.
    - Files with no findings
 
 6. Write the summary to `.context/compound-engineering/review/summary.md` and display it to the user.
+
+## Canonical Reference
+
+The canonical implementation is the `ce-review` skill in `plugins/compound-engineering/skills/ce-review/SKILL.md`. This command is a local development shim — the plugin skill includes additional execution modes (serial/parallel), ultra-thinking review phases, optional end-to-end testing, and more. See the plugin skill for the full documentation.

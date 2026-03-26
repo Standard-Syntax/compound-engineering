@@ -30,10 +30,12 @@ class TestParseIntent:
         output = "Just some text with no JSON at all"
         intent = _parse_intent(output)
         assert intent.intent == "blocked"
+        assert intent.reason is not None
 
     def test_empty_output_returns_blocked(self) -> None:
         intent = _parse_intent("")
         assert intent.intent == "blocked"
+        assert intent.reason is not None
 
     def test_all_lines_json_uses_last(self) -> None:
         output = '{"intent": "blocked"}\n{"intent": "done"}'

@@ -15,7 +15,7 @@ LangGraph work execution engine for Compound Engineering. Given a task descripti
 ```bash
 cd ce_engine
 uv sync
-uv run ce-work --task "fix the login bug" --plan-ref docs/plans/my-plan.md
+uv run ce-work '<task_description>' <plan_ref> [session_id]
 ```
 
 ## Testing

@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: cd ce_engine && uv sync
+
+      - name: Lint
+        run: cd ce_engine && uv run ruff check src/ tests/
+
+      - name: Format check
+        run: cd ce_engine && uv run ruff format --check src/ tests/
+
+      - name: Type check
+        run: cd ce_engine && uv run ty check src/
+
+      - name: Test
+        run: cd ce_engine && uv run pytest -v

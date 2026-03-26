@@ -70,7 +70,7 @@ def _parse_intent(response_text: str) -> WorkIntent:
                 )
         except json.JSONDecodeError:
             continue
-    # No valid JSON found -- default to continue but log the failure
+    # No valid JSON found -- default to blocked to halt and ask a human
     logging.warning("Could not parse intent from LLM response, defaulting to blocked")
     return WorkIntent(intent="blocked", reason="Could not parse LLM intent response")
 
