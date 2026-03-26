@@ -9,9 +9,11 @@ from langgraph.graph import START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from ce_engine.nodes import (
+    compact_progress_node,
     error_compact_node,
     human_interrupt_node,
     llm_work_node,
+    phase_compact_node,
     plan_gap_node,
     prefetch_node,
     risky_op_interrupt_node,
@@ -43,6 +45,10 @@ def _route_intent(state: WorkState) -> str:
             return "risky_op_interrupt_node"
         case "plan_gap":
             return "plan_gap_node"
+        case "phase_complete":
+            return "phase_compact_node"
+        case "compact":
+            return "compact_progress_node"
         case _:
             return "error_compact_node"
 
@@ -57,6 +63,11 @@ def _route_validate(state: WorkState) -> str:
     return "llm_work_node" if not state.tests_passed else "END"
 
 
+def _route_phase_compact(state: WorkState) -> str:
+    """Route after phase_compact_node: pause for manual verification or continue."""
+    return "human_interrupt_node" if state.manual_verification_pending else "llm_work_node"
+
+
 def build_work_graph() -> CompiledStateGraph:
     """Build and compile the work loop graph with a memory checkpointer."""
     graph = StateGraph(WorkState)
@@ -68,6 +79,8 @@ def build_work_graph() -> CompiledStateGraph:
     graph.add_node("risky_op_interrupt_node", risky_op_interrupt_node)
     graph.add_node("plan_gap_node", plan_gap_node)
     graph.add_node("validate_node", validate_node)
+    graph.add_node("phase_compact_node", phase_compact_node)
+    graph.add_node("compact_progress_node", compact_progress_node)
 
     graph.add_edge(START, "prefetch_node")
     graph.add_edge("prefetch_node", "llm_work_node")
@@ -76,6 +89,8 @@ def build_work_graph() -> CompiledStateGraph:
     graph.add_edge("human_interrupt_node", "llm_work_node")
     graph.add_conditional_edges("risky_op_interrupt_node", _route_after_risky_op)
     graph.add_edge("plan_gap_node", "llm_work_node")
+    graph.add_conditional_edges("phase_compact_node", _route_phase_compact)
+    graph.add_edge("compact_progress_node", "llm_work_node")
     graph.add_conditional_edges("validate_node", _route_validate)
 
     # NOTE: MemorySaver is process-local. Sessions cannot be resumed across process

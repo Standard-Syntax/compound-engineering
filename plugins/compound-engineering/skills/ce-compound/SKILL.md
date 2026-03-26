@@ -58,6 +58,29 @@ and codebase findings take priority over these notes.
 
 If no relevant entries are found, proceed to Phase 1 without passing memory context.
 
+### Phase 0.5b: Research Artifact Check
+
+After Phase 0.5 (Auto Memory Scan), also check for a relevant research artifact in `docs/research/`.
+
+1. Search for research artifacts relevant to the problem:
+   ```bash
+   ls docs/research/*.md 2>/dev/null | head -10
+   ```
+2. Check frontmatter `topic:` and `tags:` fields for relevance
+3. If a relevant artifact exists, prepare a labeled excerpt block:
+
+```
+## Relevant Research Artifact
+[path to research artifact]
+
+Key findings from research:
+[2-3 bullet points summarizing relevant research findings]
+```
+
+4. Pass this block as additional context to the Context Analyzer and Solution Extractor in Phase 1. If any research findings end up in the final documentation, tag them with "(research)" so their origin is clear.
+
+If no relevant research artifact is found, skip this step and proceed to Phase 1 without research context.
+
 ### Phase 1: Parallel Research
 
 <parallel_tasks>
@@ -76,7 +99,8 @@ Launch these subagents IN PARALLEL. Each returns text data to the orchestrator.
    - Identifies root cause
    - Extracts working solution with code examples
    - Incorporates auto memory excerpts (if provided by the orchestrator) as supplementary evidence -- conversation history and the verified fix take priority; if memory notes contradict the conversation, note the contradiction as cautionary context
-   - Returns: Solution content block
+   - **Research Corrections**: If a research artifact was provided, identify any misconceptions or incorrect assumptions from the research that were corrected during implementation, and explain why the research was wrong
+   - Returns: Solution content block + Research Corrections block (if applicable)
 
 #### 3. **Related Docs Finder**
    - Searches `docs/solutions/` for related documentation
@@ -112,6 +136,9 @@ The orchestrating agent (main conversation) performs these steps:
 3. Validate YAML frontmatter against schema
 4. Create directory if needed: `mkdir -p docs/solutions/[category]/`
 5. Write the SINGLE final file: `docs/solutions/[category]/[filename].md`
+
+6. **CLAUDE.md pattern prompt**: If the implementation revealed architectural patterns, data flows, or integration points not documented in CLAUDE.md, ask the developer:
+   > "Implementation revealed a pattern not documented in CLAUDE.md: [brief description]. Would you like to add it?"
 
 </sequential_tasks>
 

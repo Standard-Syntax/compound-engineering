@@ -56,6 +56,33 @@ Use **AskUserQuestion tool** to ask which source document to use, or whether to 
 
 **If no requirements document is found (or not relevant), run idea refinement:**
 
+### 0.5. Research Artifact Check
+
+After idea refinement questions (or if skipped), check for a research artifact before spawning new research agents:
+
+**If the user provides a path to a research artifact** (e.g., `docs/research/2026-03-26-auth-architecture.md` as part of the feature description), read it and announce:
+> "Using research artifact: `docs/research/YYYY-MM-DD-slug.md`. Skipping inline research."
+
+Then use the artifact as the sole research input for the rest of this skill. Do NOT run Step 1 (Local Research) or Step 1.5b (External Research) — the artifact already contains the compacted research.
+
+**If no research artifact is provided:**
+
+1. Search `docs/research/` for existing relevant artifacts:
+   ```bash
+   ls docs/research/*.md 2>/dev/null | head -20
+   ```
+2. Read frontmatter (`topic:`, `tags:`) of recent files to find matches on the current topic
+3. If a relevant artifact exists (≤30 days old), announce it and ask:
+   > "Found existing research: `docs/research/YYYY-MM-DD-slug.md` (N days old). Use it instead of re-researching?"
+
+   If the user says yes: read the artifact, skip Steps 1 and 1.5b.
+   If the user says no: proceed with Steps 1 and 1.5b as normal.
+
+4. If no relevant artifact exists: proceed with Steps 1 and 1.5b as normal. Announce:
+   > "No existing research found. Proceeding with inline research."
+
+**Why this matters:** Reusing existing research is faster, cheaper, and produces consistent understanding across sessions. Research artifacts in `docs/research/` are the compact outputs of prior `/ce:research` sessions — use them.
+
 Refine the idea through collaborative dialogue using the **AskUserQuestion tool**:
 
 - Ask questions one at a time to understand the idea fully
@@ -195,6 +222,10 @@ date: YYYY-MM-DD
 origin: docs/brainstorms/YYYY-MM-DD-<topic>-requirements.md  # if originated from a requirements doc, otherwise omit
 ---
 
+> **⚠️ Review this plan carefully before implementation.**
+> A mistake in the plan leads to 100s of bad lines of code.
+> A mistake in the research leads to 1000s.
+
 # [Issue Title]
 
 [Brief problem/feature description]
@@ -203,6 +234,20 @@ origin: docs/brainstorms/YYYY-MM-DD-<topic>-requirements.md  # if originated fro
 
 - [ ] Core requirement 1
 - [ ] Core requirement 2
+
+### Automated Verification
+
+- [ ] Tests pass: `make test`
+- [ ] Linting: `make lint`
+
+### Manual Verification
+
+- [ ] Feature works as expected
+- [ ] No regressions
+
+## What We're NOT Doing
+
+- [Explicitly list out-of-scope items]
 
 ## Context
 
@@ -250,6 +295,10 @@ date: YYYY-MM-DD
 origin: docs/brainstorms/YYYY-MM-DD-<topic>-requirements.md  # if originated from a requirements doc, otherwise omit
 ---
 
+> **⚠️ Review this plan carefully before implementation.**
+> A mistake in the plan leads to 100s of bad lines of code.
+> A mistake in the research leads to 1000s.
+
 # [Issue Title]
 
 ## Overview
@@ -283,6 +332,24 @@ origin: docs/brainstorms/YYYY-MM-DD-<topic>-requirements.md  # if originated fro
 - [ ] Detailed requirement 1
 - [ ] Detailed requirement 2
 - [ ] Testing requirements
+
+### Automated Verification
+
+- [ ] Tests pass: `make test`
+- [ ] Linting: `make lint`
+- [ ] Type check: `npm run typecheck`
+
+### Manual Verification
+
+- [ ] Feature works as expected in UI
+- [ ] Edge case X handled correctly
+- [ ] No regressions in related features
+
+## What We're NOT Doing
+
+- [Explicitly list out-of-scope items]
+- [Adjacent concerns deferred to future work]
+- [Known limitations of this approach]
 
 ## Success Metrics
 
@@ -324,6 +391,10 @@ status: active
 date: YYYY-MM-DD
 origin: docs/brainstorms/YYYY-MM-DD-<topic>-requirements.md  # if originated from a requirements doc, otherwise omit
 ---
+
+> **⚠️ Review this plan carefully before implementation.**
+> A mistake in the plan leads to 100s of bad lines of code.
+> A mistake in the research leads to 1000s.
 
 # [Issue Title]
 
@@ -369,6 +440,12 @@ origin: docs/brainstorms/YYYY-MM-DD-<topic>-requirements.md  # if originated fro
 
 [Other solutions evaluated and why rejected]
 
+## What We're NOT Doing
+
+- [Explicitly list out-of-scope items]
+- [Adjacent concerns deferred to future work]
+- [Known limitations of this approach]
+
 ## System-Wide Impact
 
 ### Interaction Graph
@@ -393,21 +470,19 @@ origin: docs/brainstorms/YYYY-MM-DD-<topic>-requirements.md  # if originated fro
 
 ## Acceptance Criteria
 
-### Functional Requirements
+### Automated Verification
 
-- [ ] Detailed functional criteria
+- [ ] Tests pass: `make test`
+- [ ] Linting: `make lint`
+- [ ] Type check: `npm run typecheck`
+- [ ] [Additional automated checks]
 
-### Non-Functional Requirements
+### Manual Verification
 
-- [ ] Performance targets
-- [ ] Security requirements
-- [ ] Accessibility standards
-
-### Quality Gates
-
-- [ ] Test coverage requirements
-- [ ] Documentation completeness
-- [ ] Code review approval
+- [ ] Feature works as expected in UI
+- [ ] Edge case X handled correctly
+- [ ] No regressions in related features
+- [ ] [Additional manual checks]
 
 ## Success Metrics
 

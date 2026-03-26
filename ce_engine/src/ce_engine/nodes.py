@@ -51,8 +51,20 @@ def _parse_intent(response_text: str) -> WorkIntent:
     The LLM is instructed to put a JSON intent on the final line, but it
     may include explanatory text above it. This scans backwards from the
     last line until a valid JSON object containing 'intent' is found.
+
+    Also detects [PHASE_COMPLETE] and [COMPACT] markers in plain text.
     """
-    lines = response_text.strip().split("\n")
+    text = response_text.strip()
+
+    # Check for phase-compact marker first (take precedence)
+    if "[PHASE_COMPLETE]" in text:
+        return WorkIntent(intent="phase_complete")
+
+    # Check for compaction marker
+    if "[COMPACT]" in text:
+        return WorkIntent(intent="compact")
+
+    lines = text.split("\n")
     for i in range(len(lines) - 1, -1, -1):
         candidate = lines[i].strip()
         if not candidate:
@@ -345,4 +357,99 @@ async def plan_gap_node(state: WorkState) -> dict[str, Any]:
     # User deferred -- treat as done
     return {
         "work_intent": WorkIntent(intent="done"),
+    }
+
+
+async def phase_compact_node(state: WorkState) -> dict[str, Any]:
+    """Handle [PHASE_COMPLETE] marker from the LLM.
+
+    Increments the phase counter, checks for manual verification items in the plan,
+    and pauses for human verification if required.
+    """
+    next_phase = state.current_phase + 1
+
+    # Read the plan file to extract manual verification items for this phase
+    plan_items: list[str] = []
+    plan_path = Path(state.plan_ref)
+    if plan_path.exists():
+        plan_text = plan_path.read_text()
+        # Look for "Manual Verification" section under the current phase
+        # This is a simple heuristic; the plan format is markdown
+        lines = plan_text.split("\n")
+        in_manual_verification = False
+        for line in lines:
+            if "### Manual Verification" in line:
+                in_manual_verification = True
+                continue
+            if in_manual_verification:
+                if line.startswith("## ") or line.startswith("# "):
+                    # Entered next top-level section
+                    break
+                stripped = line.strip()
+                if stripped.startswith("- [ ]") or stripped.startswith("- [x]"):
+                    # Extract the item text after the checkbox
+                    for prefix in ("- [x] ", "- [ ] "):
+                        if stripped.startswith(prefix):
+                            item_text = stripped.removeprefix(prefix).strip()
+                            break
+                    else:
+                        item_text = stripped
+                    if item_text:
+                        plan_items.append(item_text)
+
+    updates: dict[str, Any] = {
+        "current_phase": next_phase,
+        "manual_verification_pending": False,
+    }
+
+    if plan_items:
+        updates["manual_verification_pending"] = True
+        updates["pending_verification_items"] = plan_items
+        # Set a human-readable reason for the interrupt
+        items_list = "\n".join(f"- {item}" for item in plan_items)
+        updates["work_intent"] = WorkIntent(
+            intent="blocked",
+            reason=(
+                f"Phase {next_phase} complete — manual verification required:\n{items_list}\n\n"
+                "Reply when ready to proceed to the next phase."
+            ),
+            options=["Continue to next phase"],
+        )
+        return updates
+
+    # No manual verification needed for this phase
+    return updates
+
+
+async def compact_progress_node(state: WorkState) -> dict[str, Any]:
+    """Handle [COMPACT] marker from the LLM.
+
+    Writes a structured progress summary to the plan file before the next iteration,
+    then resets files_read_count.
+    """
+    plan_path = Path(state.plan_ref)
+
+    def _write_progress() -> None:
+        if not plan_path.exists():
+            return
+
+        existing = plan_path.read_text()
+
+        progress_entry = (
+            f"\n\n## Phase {state.current_phase} Progress (Iteration {state.iteration})\n"
+            f"### Completed\n"
+            f"- Phase work in progress (checkpoints written by LLM)\n"
+            f"### Next Steps\n"
+            f"- Continue Phase {state.current_phase} implementation\n"
+            f"### Context Notes\n"
+            f"- Files read this iteration: {state.files_read_count}\n"
+            f"- LLM output contained [COMPACT] marker — progress written to plan\n"
+        )
+
+        plan_path.write_text(existing + progress_entry)
+
+    await to_thread_run_sync(_write_progress)
+
+    return {
+        "files_read_count": 0,  # Reset after compaction
     }

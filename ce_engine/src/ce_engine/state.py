@@ -35,7 +35,9 @@ class WorkIntent(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    intent: Literal["continue", "done", "blocked", "risky_operation", "plan_gap"]
+    intent: Literal[
+        "continue", "done", "blocked", "risky_operation", "plan_gap", "phase_complete", "compact"
+    ]
     reason: str | None = None
     options: list[str] | None = None
     operation: str | None = None
@@ -56,6 +58,13 @@ class WorkState(BaseModel):
     iteration: int = 0
     max_iterations: int = 5
     tool_call_budget: int = 10
+
+    # Phase tracking
+    current_phase: int = 0
+    phase_definitions: list[str] = Field(default_factory=list)
+    manual_verification_pending: bool = False
+    pending_verification_items: list[str] = Field(default_factory=list)
+    files_read_count: int = 0
 
     # Error state
     error_baseline: list[RuffError] = Field(default_factory=list)

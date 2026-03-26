@@ -7,7 +7,7 @@ AI-powered development tools that get smarter with every use. Make each unit of 
 | Component | Count |
 |-----------|-------|
 | Agents | 29 |
-| Skills | 70 |
+| Skills | 73 |
 | MCP Servers | 1 |
 
 ## Agents
@@ -73,6 +73,7 @@ Core workflow commands use `ce:` prefix to unambiguously identify them as compou
 |---------|-------------|
 | `/ce:ideate` | Discover high-impact project improvements through divergent ideation and adversarial filtering |
 | `/ce:brainstorm` | Explore requirements and approaches before planning |
+| `/ce:research` | Conduct standalone codebase research producing a reusable artifact |
 | `/ce:plan` | Create implementation plans |
 | `/ce:review` | Run comprehensive code reviews |
 | `/ce:work` | Execute work items systematically |
@@ -90,6 +91,7 @@ Core workflow commands use `ce:` prefix to unambiguously identify them as compou
 | `/slfg` | Full autonomous workflow with swarm mode for parallel execution |
 | `/deepen-plan` | Stress-test plans and deepen weak sections with targeted research |
 | `/changelog` | Create engaging changelogs for recent merges |
+| `/ce:compact` | Produce a structured compaction summary for resuming in a new context window |
 | `/generate_command` | Generate new slash commands |
 | `/sync` | Sync Claude Code config across machines |
 | `/report-bug-ce` | Report a bug in the compound-engineering plugin |
@@ -155,6 +157,7 @@ Experimental versions of core workflow skills. These are being tested before rep
 | Skill | Description | Replaces |
 |-------|-------------|----------|
 | `ce:plan-beta` | Decision-first planning focused on boundaries, sequencing, and verification | `ce:plan` |
+| `ce:research-beta` | Standalone research producing a compacted, reusable artifact | `ce:research` |
 | `deepen-plan-beta` | Selective stress-test that targets weak sections with research | `deepen-plan` |
 
 To test: invoke `/ce:plan-beta` or `/deepen-plan-beta` directly. Plans produced by the beta skills are compatible with `/ce:work`.

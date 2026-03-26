@@ -19,6 +19,17 @@ The canonical implementation for work execution is the LangGraph engine, invoked
 5. Writes a compact error delta after each iteration
 6. Stops when the task is done or the iteration limit is reached
 
+### Phase Tracking and Verification Gates
+
+The engine supports phase-by-phase implementation with manual verification gates:
+
+- **Phase tracking:** The engine tracks `current_phase` in its state. When the LLM outputs `[PHASE_COMPLETE]` in its response text (not JSON), the engine routes to the `phase_compact_node`.
+- **Verification gates:** After each phase, the engine checks the plan file for Manual Verification items. If items exist, the engine pauses via `human_interrupt_node` and waits for human confirmation before proceeding.
+- **Compaction:** When the LLM outputs `[COMPACT]` in its response text, the engine writes a structured progress summary to the plan file and resets the file-read counter.
+- **Context budget:** The engine tracks files read directly; if more than 15 files have been read, the LLM is prompted to compact. Keep context utilization in the 40-60% range.
+
+**Plan file format for phases:** Use `### Manual Verification` heading under each phase to list items that require human verification. The engine scans for this heading to determine when to pause.
+
 ### Usage
 
 **Start a new work session:**
