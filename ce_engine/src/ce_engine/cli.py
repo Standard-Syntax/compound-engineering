@@ -9,10 +9,7 @@ import sys
 import uuid
 from pathlib import Path
 
-<<<<<<< HEAD
 import anyio
-=======
->>>>>>> origin/main
 from langgraph.types import Command, RunnableConfig
 
 from ce_engine.config import settings
@@ -85,11 +82,13 @@ def _get_interrupt_response(session_id: str, interrupt_type: str) -> str:
     /tmp/ce-work-{session_id}-{interrupt_type}.response
     """
     response_file = Path(f"/tmp/ce-work-{session_id}-{interrupt_type}.response")
-    if response_file.exists():
+    try:
         response = response_file.read_text().strip()
-        response_file.unlink()
+    except FileNotFoundError:
+        return input().strip()
+    else:
+        response_file.unlink(missing_ok=True)
         return response
-    return input().strip()
 
 
 def _handle_interrupt(interrupt_data: dict, session_id: str) -> str:

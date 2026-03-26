@@ -18,7 +18,7 @@ class RuffError(BaseModel):
     that may add new fields.
     """
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(frozen=True, extra="allow")
 
     file: str
     line: int

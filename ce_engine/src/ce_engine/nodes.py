@@ -5,12 +5,11 @@ All nodes are async def. Subprocess calls use anyio.fail_after() for timeout
 is created at module level to preserve connection pool across retries.
 """
 
-import asyncio
 import json
 from pathlib import Path
-from typing import cast
 
 import anyio
+from anyio.to_thread import run_sync as to_thread_run_sync
 from httpx import HTTPError as HttpxHTTPError
 from langchain_anthropic import ChatAnthropic
 from langgraph.types import interrupt
@@ -83,20 +82,20 @@ async def prefetch_node(state: WorkState) -> dict:
     Runs ruff and ty concurrently via anyio.TaskGroup for 30-50% time reduction.
     """
     # Run ruff and ty checks concurrently
-    results: list[list[RuffError] | str] = []
+    ruff_errors: list[RuffError] = []
+    ty_output: str = ""
 
     async def _run_ruff() -> None:
-        results.append(await run_ruff_check("."))
+        nonlocal ruff_errors
+        ruff_errors = await run_ruff_check(".")
 
     async def _run_ty() -> None:
-        results.append(await run_ty_check("."))
+        nonlocal ty_output
+        ty_output = await run_ty_check(".")
 
     async with anyio.create_task_group() as tg:
         tg.start_soon(_run_ruff)
         tg.start_soon(_run_ty)
-
-    ruff_errors: list[RuffError] = cast("list[RuffError]", results[0])
-    ty_output: str = cast("str", results[1])
 
     error_count = len(ruff_errors)
     ty_status = ty_output if ty_output else "clean"
@@ -118,7 +117,7 @@ async def prefetch_node(state: WorkState) -> dict:
         )[:2]
         return "\n".join(p.read_text()[:500] for p in recent) if recent else ""
 
-    relevant_learnings = await asyncio.to_thread(_read_learnings)
+    relevant_learnings = await to_thread_run_sync(_read_learnings)
 
     # Get current git branch
     git_result = await run_command(
@@ -162,7 +161,7 @@ async def prefetch_node(state: WorkState) -> dict:
     def _write_context_pack() -> None:
         context_pack_path.write_text(context_pack_content)
 
-    await asyncio.to_thread(_write_context_pack)
+    await to_thread_run_sync(_write_context_pack)
 
     return {
         "error_baseline": ruff_errors,
@@ -177,19 +176,32 @@ async def prefetch_node(state: WorkState) -> dict:
 async def _call_llm(prompt: str) -> str:
     """Call the LLM with exponential backoff retry (max 3 attempts)."""
     result: str | None = None
-    async for attempt in AsyncRetrying(
-        retry=retry_if_exception_type((OSError, HttpxHTTPError)),
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-    ):
-        with attempt:
-            response = await _get_llm().ainvoke(prompt)
-            result = str(response.content)
-    # AsyncRetrying with stop_after_attempt always yields at least once.
-    # If we reach here without result, raise to avoid returning None.
-    if result is None:
-        msg = "AsyncRetrying loop completed without result"
-        raise RuntimeError(msg)
+    try:
+        async for attempt in AsyncRetrying(
+            retry=retry_if_exception_type((OSError, HttpxHTTPError)),
+            stop=stop_after_attempt(3),
+            wait=wait_exponential(multiplier=1, min=2, max=10),
+        ):
+            with attempt:
+                response = await _get_llm().ainvoke(prompt)
+                result = str(response.content)
+    except BaseException as exc:
+        # Re-raise fatal exceptions immediately -- never swallow them.
+        if isinstance(exc, (KeyboardInterrupt, SystemExit, GeneratorExit)):
+            raise
+        # Tenacity wraps non-retried exceptions in RetryError. Unwrap and re-raise
+        # so the caller sees the true exception.
+        if isinstance(exc, RetryError) and exc.last_attempt is not None:
+            real_exc = exc.last_attempt.exception()
+            if isinstance(real_exc, (KeyboardInterrupt, SystemExit, GeneratorExit)):
+                raise real_exc from exc
+        # AsyncRetrying with stop_after_attempt always yields at least once.
+        # If we reach here without result, raise to avoid returning None.
+        if result is None:
+            msg = "AsyncRetrying loop completed without result"
+            raise RuntimeError(msg) from exc
+        raise RuntimeError(f"LLM call failed: {exc}") from exc
+    assert result is not None, "AsyncRetrying always yields at least once"
     return result
 
 
@@ -222,11 +234,26 @@ async def llm_work_node(state: WorkState) -> dict:
 
 async def error_compact_node(state: WorkState) -> dict:
     """Re-run ruff, compute the delta from baseline, and update state."""
-    current_errors = await run_ruff_check(".")
+    current_errors: list[RuffError] = []
+    ty_output: str = ""
+
+    async def _run_ruff() -> None:
+        nonlocal current_errors
+        current_errors = await run_ruff_check(".")
+
+    async def _run_ty() -> None:
+        nonlocal ty_output
+        ty_output = await run_ty_check(".")
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(_run_ruff)
+        tg.start_soon(_run_ty)
+
     delta = compute_error_delta(state.error_baseline, current_errors)
+    ty_status = ty_output if ty_output else "clean"
     return {
         "error_current": current_errors,
-        "error_delta": delta,
+        "error_delta": f"{delta}\nty: {ty_status}",
     }
 
 
@@ -245,10 +272,10 @@ async def human_interrupt_node(state: WorkState) -> dict:
     pack_path = Path(state.context_pack_path)
 
     def _append_decision() -> None:
-        existing = pack_path.read_text()
+        existing = pack_path.read_text() if pack_path.exists() else ""
         pack_path.write_text(existing + f"\n<human_decision>\n  {response}\n</human_decision>\n")
 
-    await asyncio.to_thread(_append_decision)
+    await to_thread_run_sync(_append_decision)
     return {"work_intent": make_continue_intent()}
 
 
@@ -276,15 +303,18 @@ async def validate_node(state: WorkState) -> dict:
 
     pytest_result = await run_pytest(".")
     if pytest_result.returncode != 0:
-        # Tests failed -- signal the work loop to continue fixing
+        # Truncate output to avoid embedding megabytes in state
+        stdout = pytest_result.stdout[:500]
+        stderr = pytest_result.stderr[:200]
+        suffix = "..." if len(pytest_result.stdout) > 500 or len(pytest_result.stderr) > 200 else ""
         return {
             "error_current": final_errors,
             "error_delta": (
-                f"Tests failed. Fix failing tests before continuing.\n"
-                f"pytest output:\n{pytest_result.stdout}\n{pytest_result.stderr}"
+                f"Tests failed ({pytest_result.returncode}). "
+                f"Fix failing tests before continuing.\n"
+                f"pytest output:\n{stdout}{suffix}\n{stderr}{suffix}"
             ),
             "work_intent": make_continue_intent(),
-            "task_description": "Fix failing tests",
         }
 
     final_delta = f"Final: {len(final_errors)} ruff errors. ty: {ty_status}"
@@ -308,7 +338,7 @@ async def plan_gap_node(state: WorkState) -> dict:
             + f"{intent.description}\n"
         )
 
-    await asyncio.to_thread(_write_gap)
+    await to_thread_run_sync(_write_gap)
 
     response = interrupt(
         value={
