@@ -3,6 +3,8 @@ title: Adding New Converter Target Providers
 category: architecture
 tags: [converter, target-provider, plugin-conversion, multi-platform, pattern]
 created: 2026-02-23
+archived_date: 2026-03-25
+archive_reason: "The TypeScript converter CLI described in this doc (src/converters/, src/targets/, etc.) does not exist in this repository. The repo structure is ce_engine/ (Python), plugins/compound-engineering/ (agents+skills), and docs/. The converter CLI architecture described is for a different codebase. No successor doc exists in this repo."
 severity: medium
 component: converter-cli
 problem_type: best_practice
