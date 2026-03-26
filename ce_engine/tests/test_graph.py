@@ -121,7 +121,7 @@ class TestRouteAfterRiskyOp:
 
 
 class TestRouteValidate:
-    def _make_state(self, error_delta: str) -> WorkState:
+    def _make_state(self, error_delta: str, tests_passed: bool = True) -> WorkState:
         return WorkState(
             task_description="Add feature X",
             plan_ref="plan.md",
@@ -136,16 +136,19 @@ class TestRouteValidate:
             work_intent=None,
             llm_response=None,
             approved=False,
+            tests_passed=tests_passed,
         )
 
     def test_tests_failed_continues(self) -> None:
         assert (
-            _route_validate(self._make_state("Tests failed. Fix failing tests before continuing."))
+            _route_validate(
+                self._make_state("Tests failed. Fix failing tests before continuing.", tests_passed=False)
+            )
             == "llm_work_node"
         )
 
     def test_other_delta_ends(self) -> None:
-        assert _route_validate(self._make_state("Final: 0 ruff errors. ty: clean")) == "END"
+        assert _route_validate(self._make_state("Final: 0 ruff errors. ty: clean", tests_passed=True)) == "END"
 
 
 class TestBuildWorkGraph:

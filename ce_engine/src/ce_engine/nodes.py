@@ -1,13 +1,15 @@
 """LangGraph nodes for the CE work engine.
 
 All nodes are async def. Subprocess calls use anyio.fail_after() for timeout
-(anyio.run_process has NO built-in timeout parameter). A singleton LLM client
-is created at module level to preserve connection pool across retries.
+(anyio.run_process has NO built-in timeout parameter). The LLM client is
+cached via functools.cache to preserve the connection pool across retries.
 """
 
+import functools
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
 import anyio
 from anyio.to_thread import run_sync as to_thread_run_sync
@@ -33,19 +35,14 @@ from ce_engine.toolchain import (
     run_ty_check,
 )
 
-# Lazy LLM singleton -- created once on first call to preserve connection pool
-_llm: ChatAnthropic | None = None
 
-
+@functools.cache
 def _get_llm() -> ChatAnthropic:
-    """Lazily initialize the LLM client."""
-    global _llm
-    if _llm is None:
-        _llm = ChatAnthropic(
-            model_name=settings.model_name,
-            timeout=60.0,  # read timeout; connect uses httpx default
-        )
-    return _llm
+    """Cached LLM client. functools.cache makes the cached value immutable after first call."""
+    return ChatAnthropic(
+        model_name=settings.model_name,
+        timeout=60.0,  # read timeout; connect uses httpx default
+    )
 
 
 def _parse_intent(response_text: str) -> WorkIntent:
@@ -78,26 +75,32 @@ def _parse_intent(response_text: str) -> WorkIntent:
     return WorkIntent(intent="blocked", reason="Could not parse LLM intent response")
 
 
-async def prefetch_node(state: WorkState) -> dict:
-    """Run all tools and build the Context Pack before any LLM call.
-
-    Runs ruff and ty concurrently via anyio.TaskGroup for 30-50% time reduction.
-    """
-    # Run ruff and ty checks concurrently
+async def _run_lint_checks(path: str = ".") -> tuple[list[RuffError], str]:
+    """Run ruff and ty concurrently. Returns (ruff_errors, ty_output)."""
     ruff_errors: list[RuffError] = []
     ty_output: str = ""
 
-    async def _run_ruff() -> None:
+    async def _ruff() -> None:
         nonlocal ruff_errors
-        ruff_errors = await run_ruff_check(".")
+        ruff_errors = await run_ruff_check(path)
 
-    async def _run_ty() -> None:
+    async def _ty() -> None:
         nonlocal ty_output
-        ty_output = await run_ty_check(".")
+        ty_output = await run_ty_check(path)
 
     async with anyio.create_task_group() as tg:
-        tg.start_soon(_run_ruff)
-        tg.start_soon(_run_ty)
+        tg.start_soon(_ruff)
+        tg.start_soon(_ty)
+
+    return ruff_errors, ty_output
+
+
+async def prefetch_node(state: WorkState) -> dict[str, Any]:
+    """Run all tools and build the Context Pack before any LLM call.
+
+    Runs ruff and ty concurrently via _run_lint_checks for 30-50% time reduction.
+    """
+    ruff_errors, ty_output = await _run_lint_checks(".")
 
     error_count = len(ruff_errors)
     ty_status = ty_output if ty_output else "clean"
@@ -207,7 +210,7 @@ async def _call_llm(prompt: str) -> str:
     return result
 
 
-async def llm_work_node(state: WorkState) -> dict:
+async def llm_work_node(state: WorkState) -> dict[str, Any]:
     """Call the LLM to perform one iteration of work."""
     prompt = build_work_prompt(state)
     try:
@@ -234,22 +237,9 @@ async def llm_work_node(state: WorkState) -> dict:
     }
 
 
-async def error_compact_node(state: WorkState) -> dict:
+async def error_compact_node(state: WorkState) -> dict[str, Any]:
     """Re-run ruff, compute the delta from baseline, and update state."""
-    current_errors: list[RuffError] = []
-    ty_output: str = ""
-
-    async def _run_ruff() -> None:
-        nonlocal current_errors
-        current_errors = await run_ruff_check(".")
-
-    async def _run_ty() -> None:
-        nonlocal ty_output
-        ty_output = await run_ty_check(".")
-
-    async with anyio.create_task_group() as tg:
-        tg.start_soon(_run_ruff)
-        tg.start_soon(_run_ty)
+    current_errors, ty_output = await _run_lint_checks(".")
 
     delta = compute_error_delta(state.error_baseline, current_errors)
     ty_status = ty_output if ty_output else "clean"
@@ -297,10 +287,9 @@ async def risky_op_interrupt_node(state: WorkState) -> dict:
     return {"approved": approved}
 
 
-async def validate_node(state: WorkState) -> dict:
+async def validate_node(state: WorkState) -> dict[str, Any]:
     """Run final toolchain checks after the LLM declares the work done."""
-    final_errors = await run_ruff_check(".")
-    ty_output = await run_ty_check(".")
+    final_errors, ty_output = await _run_lint_checks(".")
     ty_status = ty_output if ty_output else "clean"
 
     pytest_result = await run_pytest(".")
@@ -317,12 +306,14 @@ async def validate_node(state: WorkState) -> dict:
                 f"pytest output:\n{stdout}{suffix}\n{stderr}{suffix}"
             ),
             "work_intent": make_continue_intent(),
+            "tests_passed": False,
         }
 
     final_delta = f"Final: {len(final_errors)} ruff errors. ty: {ty_status}"
     return {
         "error_current": final_errors,
         "error_delta": final_delta,
+        "tests_passed": True,
     }
 
 

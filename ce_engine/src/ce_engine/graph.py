@@ -54,7 +54,7 @@ def _route_after_risky_op(state: WorkState) -> str:
 
 def _route_validate(state: WorkState) -> str:
     """Route to the work loop when tests failed, otherwise terminate."""
-    return "llm_work_node" if "tests failed" in state.error_delta.lower() else "END"
+    return "llm_work_node" if not state.tests_passed else "END"
 
 
 def build_work_graph() -> CompiledStateGraph:

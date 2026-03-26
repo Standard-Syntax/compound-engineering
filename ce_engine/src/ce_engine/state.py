@@ -73,6 +73,9 @@ class WorkState(BaseModel):
     # Control
     approved: bool = False
 
+    # Validation
+    tests_passed: bool = True
+
 
 def make_continue_intent() -> WorkIntent:
     """Factory for a default 'continue' intent.
