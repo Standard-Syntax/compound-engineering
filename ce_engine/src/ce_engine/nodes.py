@@ -6,6 +6,7 @@ is created at module level to preserve connection pool across retries.
 """
 
 import json
+import logging
 from pathlib import Path
 
 import anyio
@@ -72,8 +73,9 @@ def _parse_intent(response_text: str) -> WorkIntent:
                 )
         except json.JSONDecodeError:
             continue
-    # No valid JSON found -- default to continue
-    return make_continue_intent()
+    # No valid JSON found -- default to continue but log the failure
+    logging.warning("Could not parse intent from LLM response, defaulting to blocked")
+    return WorkIntent(intent="blocked", reason="Could not parse LLM intent response")
 
 
 async def prefetch_node(state: WorkState) -> dict:
