@@ -176,19 +176,32 @@ async def prefetch_node(state: WorkState) -> dict:
 async def _call_llm(prompt: str) -> str:
     """Call the LLM with exponential backoff retry (max 3 attempts)."""
     result: str | None = None
-    async for attempt in AsyncRetrying(
-        retry=retry_if_exception_type((OSError, HttpxHTTPError)),
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-    ):
-        with attempt:
-            response = await _get_llm().ainvoke(prompt)
-            result = str(response.content)
-    # AsyncRetrying with stop_after_attempt always yields at least once.
-    # If we reach here without result, raise to avoid returning None.
-    if result is None:
-        msg = "AsyncRetrying loop completed without result"
-        raise RuntimeError(msg)
+    try:
+        async for attempt in AsyncRetrying(
+            retry=retry_if_exception_type((OSError, HttpxHTTPError)),
+            stop=stop_after_attempt(3),
+            wait=wait_exponential(multiplier=1, min=2, max=10),
+        ):
+            with attempt:
+                response = await _get_llm().ainvoke(prompt)
+                result = str(response.content)
+    except BaseException as exc:
+        # Re-raise fatal exceptions immediately -- never swallow them.
+        if isinstance(exc, (KeyboardInterrupt, SystemExit, GeneratorExit)):
+            raise
+        # Tenacity wraps non-retried exceptions in RetryError. Unwrap and re-raise
+        # so the caller sees the true exception.
+        if isinstance(exc, RetryError) and exc.last_attempt is not None:
+            real_exc = exc.last_attempt.exception()
+            if isinstance(real_exc, (KeyboardInterrupt, SystemExit, GeneratorExit)):
+                raise real_exc from exc
+        # AsyncRetrying with stop_after_attempt always yields at least once.
+        # If we reach here without result, raise to avoid returning None.
+        if result is None:
+            msg = "AsyncRetrying loop completed without result"
+            raise RuntimeError(msg) from exc
+        raise RuntimeError(f"LLM call failed: {exc}") from exc
+    assert result is not None, "AsyncRetrying always yields at least once"
     return result
 
 
@@ -221,8 +234,21 @@ async def llm_work_node(state: WorkState) -> dict:
 
 async def error_compact_node(state: WorkState) -> dict:
     """Re-run ruff, compute the delta from baseline, and update state."""
-    current_errors = await run_ruff_check(".")
-    ty_output = await run_ty_check(".")
+    current_errors: list[RuffError] = []
+    ty_output: str = ""
+
+    async def _run_ruff() -> None:
+        nonlocal current_errors
+        current_errors = await run_ruff_check(".")
+
+    async def _run_ty() -> None:
+        nonlocal ty_output
+        ty_output = await run_ty_check(".")
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(_run_ruff)
+        tg.start_soon(_run_ty)
+
     delta = compute_error_delta(state.error_baseline, current_errors)
     ty_status = ty_output if ty_output else "clean"
     return {
@@ -277,12 +303,16 @@ async def validate_node(state: WorkState) -> dict:
 
     pytest_result = await run_pytest(".")
     if pytest_result.returncode != 0:
-        # Tests failed -- signal the work loop to continue fixing
+        # Truncate output to avoid embedding megabytes in state
+        stdout = pytest_result.stdout[:500]
+        stderr = pytest_result.stderr[:200]
+        suffix = "..." if len(pytest_result.stdout) > 500 or len(pytest_result.stderr) > 200 else ""
         return {
             "error_current": final_errors,
             "error_delta": (
-                f"Tests failed. Fix failing tests before continuing.\n"
-                f"pytest output:\n{pytest_result.stdout}\n{pytest_result.stderr}"
+                f"Tests failed ({pytest_result.returncode}). "
+                f"Fix failing tests before continuing.\n"
+                f"pytest output:\n{stdout}{suffix}\n{stderr}{suffix}"
             ),
             "work_intent": make_continue_intent(),
         }

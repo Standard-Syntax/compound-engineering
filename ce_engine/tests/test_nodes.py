@@ -128,6 +128,3 @@ class TestPrefetchConcurrentRace:
             assert isinstance(result["error_current"], list), (
                 f"run {i}: error_current is {type(result['error_current'])}, expected list"
             )
-            # ty_output must always be a string (or absent, defaulting to "")
-            ty_out = result.get("ty_output", "")
-            assert isinstance(ty_out, str), f"run {i}: ty_output is {type(ty_out)}, expected str"

@@ -31,11 +31,14 @@ class TestGraphWiring:
         async def mock_call_llm(prompt: str) -> str:
             return '{"intent": "done"}'
 
-        async def mock_run_command(cmd: list[str], timeout: float = 30.0) -> CommandResult:
+        async def mock_run_command(cmd: list[str], *, timeout: float = 30.0) -> CommandResult:
             if cmd == ["git", "branch", "--show-current"]:
                 return CommandResult(returncode=0, stdout="main", stderr="")
             if cmd == ["git", "diff", "--name-only", "HEAD"]:
                 return CommandResult(returncode=0, stdout="", stderr="")
+            return CommandResult(returncode=0, stdout="", stderr="")
+
+        async def mock_pytest(path: str = ".") -> CommandResult:
             return CommandResult(returncode=0, stdout="", stderr="")
 
         # Monkeypatch the learnings_path and context_pack_path to use tmp_path
@@ -66,6 +69,7 @@ class TestGraphWiring:
             patch("ce_engine.nodes.run_ruff_check", mock_ruff_check),
             patch("ce_engine.nodes.run_ty_check", mock_ty_check),
             patch("ce_engine.nodes.run_command", mock_run_command),
+            patch("ce_engine.nodes.run_pytest", mock_pytest),
             patch("ce_engine.nodes._call_llm", mock_call_llm),
             patch("ce_engine.nodes.settings") as mock_settings,
         ):
@@ -73,6 +77,11 @@ class TestGraphWiring:
             mock_settings.context_pack_path = context_pack
             mock_settings.git_timeout = 5.0
             mock_settings.lint_timeout = 5.0
+            mock_settings.pytest_timeout = 60.0
+            mock_settings.plan_gaps_path = tmp_path / "plan-gaps.md"
+            mock_settings.model_name = "test-model"
+            mock_settings.max_iterations = 3
+            mock_settings.tool_call_budget = 10
             result = await graph.ainvoke(state, config)
 
         # Graph should complete without raising
