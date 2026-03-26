@@ -140,15 +140,15 @@ class TestRouteValidate:
         )
 
     def test_tests_failed_continues(self) -> None:
-        assert (
-            _route_validate(
-                self._make_state("Tests failed. Fix failing tests before continuing.", tests_passed=False)
-            )
-            == "llm_work_node"
+        state = self._make_state(
+            "Tests failed. Fix failing tests before continuing.",
+            tests_passed=False,
         )
+        assert _route_validate(state) == "llm_work_node"
 
     def test_other_delta_ends(self) -> None:
-        assert _route_validate(self._make_state("Final: 0 ruff errors. ty: clean", tests_passed=True)) == "END"
+        state = self._make_state("Final: 0 ruff errors. ty: clean", tests_passed=True)
+        assert _route_validate(state) == "END"
 
 
 class TestBuildWorkGraph:
