@@ -11,7 +11,7 @@ A Claude Code plugin marketplace featuring the **Compound Engineering Plugin** �
 
 ## Python Stack
 
-The plugin ships with a Python work execution engine (`ce_engine/`) built on LangGraph and PydanticAI.
+The plugin ships with a Python work execution engine (`ce_engine/`) built on LangGraph and `langchain-anthropic`.
 
 | Layer | Choice |
 |-------|--------|
@@ -20,8 +20,8 @@ The plugin ships with a Python work execution engine (`ce_engine/`) built on Lan
 | Lint | `ruff` |
 | Type checker | `ty` |
 | Data validation | Pydantic v2 |
-| AI frameworks | LangGraph · PydanticAI · Anthropic SDK |
-| HTTP | `httpx` + `tenacity` |
+| AI frameworks | LangGraph · langchain-anthropic |
+| HTTP | `tenacity` (via langchain-anthropic client) |
 
 ```bash
 cd ce_engine
