@@ -5,3 +5,10 @@ node_modules/
 todos/
 .worktrees
 .context/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.ruff_cache/
