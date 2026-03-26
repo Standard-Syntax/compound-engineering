@@ -1,10 +1,10 @@
 """Tests for ce_engine.nodes intent parsing and CLI input validation."""
 
-import asyncio
 import random
 from pathlib import Path
 from unittest.mock import patch
 
+import anyio
 import pytest
 
 from ce_engine.cli import _validate_plan_ref, _validate_task_description
@@ -102,11 +102,11 @@ class TestPrefetchConcurrentRace:
         """
 
         async def mock_ruff(path: str) -> list[RuffError]:
-            await asyncio.sleep(random.uniform(0.001, 0.01))
+            await anyio.sleep(random.uniform(0.001, 0.01))
             return [RuffError(file="a.py", line=1, col=0, code="E501", message="")]
 
         async def mock_ty(path: str) -> str:
-            await asyncio.sleep(random.uniform(0.001, 0.01))
+            await anyio.sleep(random.uniform(0.001, 0.01))
             return ""
 
         async def mock_run_command(cmd: list[str], *, timeout: float = 30.0):

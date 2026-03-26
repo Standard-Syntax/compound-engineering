@@ -4,7 +4,6 @@ All subprocess calls use anyio.fail_after() for timeout -- anyio.run_process()
 has NO built-in timeout parameter.
 """
 
-import asyncio
 import json
 from dataclasses import dataclass
 
@@ -44,7 +43,8 @@ async def run_command(cmd: list[str], timeout: float = 30.0) -> CommandResult:
     # Use BaseException to catch ExceptionGroup-wrapped TimeoutError from
     # anyio's cancel scope. Never silently swallow fatal exceptions.
     except BaseException as exc:
-        if isinstance(exc, (KeyboardInterrupt, SystemExit, GeneratorExit, asyncio.CancelledError)):
+        cancelled = anyio.get_cancelled_exc_class()
+        if isinstance(exc, (KeyboardInterrupt, SystemExit, GeneratorExit, cancelled)):
             raise  # Never silently swallow fatal exceptions
         return CommandResult(returncode=124, stdout="", stderr="Command timed out")
 
