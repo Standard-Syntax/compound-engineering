@@ -1,15 +1,16 @@
 """Tests for ce_engine.nodes intent parsing and CLI input validation."""
 
-import asyncio
 import random
 from pathlib import Path
 from unittest.mock import patch
 
+import anyio
 import pytest
 
 from ce_engine.cli import _validate_plan_ref, _validate_task_description
 from ce_engine.nodes import _parse_intent, prefetch_node
 from ce_engine.state import RuffError, WorkState
+from ce_engine.toolchain import CommandResult
 
 
 class TestParseIntent:
@@ -25,14 +26,14 @@ class TestParseIntent:
         assert intent.intent == "continue"
         assert intent.reason == "more work needed"
 
-    def test_no_json_returns_continue(self) -> None:
+    def test_no_json_returns_blocked(self) -> None:
         output = "Just some text with no JSON at all"
         intent = _parse_intent(output)
-        assert intent.intent == "continue"
+        assert intent.intent == "blocked"
 
-    def test_empty_output_returns_continue(self) -> None:
+    def test_empty_output_returns_blocked(self) -> None:
         intent = _parse_intent("")
-        assert intent.intent == "continue"
+        assert intent.intent == "blocked"
 
     def test_all_lines_json_uses_last(self) -> None:
         output = '{"intent": "blocked"}\n{"intent": "done"}'
@@ -102,15 +103,15 @@ class TestPrefetchConcurrentRace:
         """
 
         async def mock_ruff(path: str) -> list[RuffError]:
-            await asyncio.sleep(random.uniform(0.001, 0.01))
+            await anyio.sleep(random.uniform(0.001, 0.01))
             return [RuffError(file="a.py", line=1, col=0, code="E501", message="")]
 
         async def mock_ty(path: str) -> str:
-            await asyncio.sleep(random.uniform(0.001, 0.01))
+            await anyio.sleep(random.uniform(0.001, 0.01))
             return ""
 
-        async def mock_run_command(cmd: list[str], *, timeout: float = 30.0):
-            return type("R", (), {"returncode": 0, "stdout": b"", "stderr": b""})()
+        async def mock_run_command(cmd: list[str], *, timeout: float = 30.0) -> CommandResult:
+            return CommandResult(returncode=0, stdout="", stderr="")
 
         for i in range(10):
             with (

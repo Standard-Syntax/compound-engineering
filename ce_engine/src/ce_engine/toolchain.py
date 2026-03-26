@@ -23,7 +23,7 @@ class CommandResult:
     stderr: str
 
 
-async def run_command(cmd: list[str], timeout: float = 30.0) -> CommandResult:
+async def run_command(cmd: list[str], *, timeout: float = 30.0) -> CommandResult:
     """Run a command with timeout via anyio.fail_after cancel scope.
 
     Args:
@@ -44,7 +44,8 @@ async def run_command(cmd: list[str], timeout: float = 30.0) -> CommandResult:
     # Use BaseException to catch ExceptionGroup-wrapped TimeoutError from
     # anyio's cancel scope. Never silently swallow fatal exceptions.
     except BaseException as exc:
-        if isinstance(exc, (KeyboardInterrupt, SystemExit, GeneratorExit, asyncio.CancelledError)):
+        cancelled = anyio.get_cancelled_exc_class()
+        if isinstance(exc, (KeyboardInterrupt, SystemExit, GeneratorExit, cancelled)):
             raise  # Never silently swallow fatal exceptions
         return CommandResult(returncode=124, stdout="", stderr="Command timed out")
 

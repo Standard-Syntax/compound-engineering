@@ -4,12 +4,14 @@ Uses Pydantic CliInput for argument validation and anyio.run() for
 the async entry point.
 """
 
+import functools
 import logging
 import sys
 import uuid
 from pathlib import Path
 
 import anyio
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command, RunnableConfig
 
 from ce_engine.config import settings
@@ -17,6 +19,12 @@ from ce_engine.graph import build_work_graph
 from ce_engine.state import WorkState
 
 _MAX_TASK_LENGTH = 1000
+
+
+@functools.cache
+def _get_work_graph() -> CompiledStateGraph:
+    """Cached compiled graph. functools.cache makes the result immutable after first call."""
+    return build_work_graph()
 
 
 def _validate_task_description(task: str) -> str:
@@ -140,7 +148,7 @@ async def _run_work(task: str, plan_ref: str, session_id: str | None = None) -> 
         plan_ref: Path to the plan file.
         session_id: Existing session ID to resume. If None, starts fresh.
     """
-    graph = build_work_graph()
+    graph = _get_work_graph()
     thread_id = session_id or str(uuid.uuid4())
     config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
 

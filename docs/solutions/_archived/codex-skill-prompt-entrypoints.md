@@ -7,6 +7,8 @@ severity: medium
 component: codex-target
 problem_type: best_practice
 root_cause: outdated_target_model
+archived_date: 2026-03-25
+archive_reason: "References the same non-existent TypeScript converter CLI (src/converters/claude-to-codex.ts, src/targets/codex.ts, src/types/codex.ts) as adding-converter-target-providers.md. The Codex conversion architecture described does not exist in this repository. Related doc: docs/solutions/_archived/adding-converter-target-providers.md"
 ---
 
 # Codex Conversion Skills, Prompts, and Canonical Entry Points
