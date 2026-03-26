@@ -249,7 +249,7 @@ async def error_compact_node(state: WorkState) -> dict[str, Any]:
     }
 
 
-async def human_interrupt_node(state: WorkState) -> dict:
+async def human_interrupt_node(state: WorkState) -> dict[str, Any]:
     """Pause and ask the human to resolve a blocking question."""
     intent = state.work_intent or make_continue_intent()
     response = interrupt(
@@ -271,7 +271,7 @@ async def human_interrupt_node(state: WorkState) -> dict:
     return {"work_intent": make_continue_intent()}
 
 
-async def risky_op_interrupt_node(state: WorkState) -> dict:
+async def risky_op_interrupt_node(state: WorkState) -> dict[str, Any]:
     """Pause and ask the human to approve a potentially destructive operation."""
     intent = state.work_intent or make_continue_intent()
     response = interrupt(
@@ -317,7 +317,7 @@ async def validate_node(state: WorkState) -> dict[str, Any]:
     }
 
 
-async def plan_gap_node(state: WorkState) -> dict:
+async def plan_gap_node(state: WorkState) -> dict[str, Any]:
     """Record a plan gap and ask the human whether to include it or defer."""
     intent = state.work_intent or make_continue_intent()
     gap_path = settings.plan_gaps_path
