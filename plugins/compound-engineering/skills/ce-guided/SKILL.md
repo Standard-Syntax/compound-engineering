@@ -33,7 +33,7 @@ Each guided session maintains a manifest file so independent commands pass state
   "research_artifact": null,
   "plan_path": null,
   "work_branch": null,
-  "review_output": null,
+  "review_output": null,  // {"p1": N, "p2": M, "p3": K} — populated after Phase 4
   "solution_path": null,
   "status": "in_progress"
 }
@@ -270,9 +270,12 @@ Choices at this gate differ slightly:
 
 Run `/ce:review <branch_name>` where `branch_name` is from `manifest.work_branch`.
 
-After completion:
-- Update manifest: `review_output` = summary of review findings (atomic write)
-- Proceed to Gate 4
+`/ce:review` produces todo files in `todos/` (one per finding) and prints a summary report to chat. After completion:
+
+1. Parse the summary report from chat output for P1/P2/P3 counts
+2. Count todo files in `todos/` matching `*-pending-p1-*.md`, `*-pending-p2-*.md`, `*-pending-p3-*.md` as a cross-check
+3. Update manifest: `review_output` = `{"p1": N, "p2": M, "p3": K}` (atomic write)
+4. Proceed to Gate 4
 
 ---
 
