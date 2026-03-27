@@ -52,7 +52,7 @@ Return structured JSON (not Markdown prose):
 ```json
 {
   "agent": "codebase-locator",
-  "status": "complete",
+  "status": "complete | partial",
   "search_strategy": "<what was searched and how>",
   "files": [
     { "path": "path/to/file.ext", "description": "1-line description" }
