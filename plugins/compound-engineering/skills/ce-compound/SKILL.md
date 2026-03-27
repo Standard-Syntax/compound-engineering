@@ -58,9 +58,11 @@ and codebase findings take priority over these notes.
 
 If no relevant entries are found, proceed to Phase 1 without passing memory context.
 
-### Phase 0.5b: Research Artifact Check
+### Phase 0.5b: Research Artifact + Plan Gaps Check
 
-After Phase 0.5 (Auto Memory Scan), also check for a relevant research artifact in `docs/research/`.
+After Phase 0.5 (Auto Memory Scan), check for a relevant research artifact in `docs/research/` and also check for plan gap data from the work session.
+
+**Research Artifact Check:**
 
 1. Search for research artifacts relevant to the problem:
    ```bash
@@ -79,7 +81,30 @@ Key findings from research:
 
 4. Pass this block as additional context to the Context Analyzer and Solution Extractor in Phase 1. If any research findings end up in the final documentation, tag them with "(research)" so their origin is clear.
 
-If no relevant research artifact is found, skip this step and proceed to Phase 1 without research context.
+**Plan Gaps Check:**
+
+1. Check for `.context/compound-engineering/plan-gaps.md`:
+   ```bash
+   cat .context/compound-engineering/plan-gaps.md 2>/dev/null
+   ```
+2. If the file exists and has content, parse each gap entry
+3. Tag each gap as either:
+   - **resolved** — marked "include in this work" during the work session
+   - **deferred** — marked "defer to next plan"
+4. Prepare a labeled block:
+
+```
+## Plan Gaps (from work session)
+[Resolved this cycle]
+- [Gap N]: {description} — resolved by {what changed}
+
+[Deferred to next plan]
+- [Gap N]: {description} — reason for deferral
+```
+
+5. Pass this block to all Phase 1 subagents tagged "(plan gaps)". The Solution Extractor uses this to document what the plan missed and what remains for future planning.
+
+If no research artifact is found, skip that step. If no plan-gaps.md exists or is empty, skip the plan gaps step.
 
 ### Phase 1: Parallel Research
 
@@ -100,7 +125,8 @@ Launch these subagents IN PARALLEL. Each returns text data to the orchestrator.
    - Extracts working solution with code examples
    - Incorporates auto memory excerpts (if provided by the orchestrator) as supplementary evidence -- conversation history and the verified fix take priority; if memory notes contradict the conversation, note the contradiction as cautionary context
    - **Research Corrections**: If a research artifact was provided, identify any misconceptions or incorrect assumptions from the research that were corrected during implementation, and explain why the research was wrong
-   - Returns: Solution content block + Research Corrections block (if applicable)
+   - **Plan Gap Handling**: If plan gap entries were provided by the orchestrator, note which gaps were **resolved** during this work cycle and which were **deferred**. For resolved gaps, explain in the solution what the plan missed. For deferred gaps, flag them as items for future planning.
+   - Returns: Solution content block + Research Corrections block (if applicable) + Plan Gap Notes (if applicable)
 
 #### 3. **Related Docs Finder**
    - Searches `docs/solutions/` for related documentation
@@ -133,61 +159,67 @@ The orchestrating agent (main conversation) performs these steps:
 
 1. Collect all text results from Phase 1 subagents
 2. Assemble complete markdown file from the collected pieces
-3. Validate YAML frontmatter against schema
-4. Create directory if needed: `mkdir -p docs/solutions/[category]/`
-5. Write the SINGLE final file: `docs/solutions/[category]/[filename].md`
+3. If plan gap entries were provided by Phase 1, assemble the **"Plan Gaps Encountered"** section:
 
-6. **CLAUDE.md pattern prompt**: If the implementation revealed architectural patterns, data flows, or integration points not documented in CLAUDE.md, ask the developer:
+```markdown
+## Plan Gaps Encountered
+
+### Resolved This Cycle
+- **[Gap N]**: {description} — resolved by {what changed}
+
+### Deferred to Next Plan
+- **[Gap N]**: {description} — reason for deferral
+```
+
+4. Validate YAML frontmatter against schema
+5. Create directory if needed: `mkdir -p docs/solutions/[category]/`
+6. Write the SINGLE final file: `docs/solutions/[category]/[filename].md`
+
+7. **CLAUDE.md pattern prompt**: If the implementation revealed architectural patterns, data flows, or integration points not documented in CLAUDE.md, ask the developer:
    > "Implementation revealed a pattern not documented in CLAUDE.md: [brief description]. Would you like to add it?"
 
 </sequential_tasks>
 
-### Phase 2.5: Selective Refresh Check
+### Phase 2.5: Retroanalysis + Assembly
 
-After writing the new learning, decide whether this new solution is evidence that older docs should be refreshed.
+**This phase runs before the file write** — retroanalysis informs the assembled document.
 
-`ce:compound-refresh` is **not** a default follow-up. Use it selectively when the new learning suggests an older learning or pattern doc may now be inaccurate.
+1. **Generate retroanalysis content** (only if plan and review artifacts exist):
+   - Read the plan file at `state.plan_ref`
+   - Read `.context/compound-engineering/plan-gaps.md` if it exists
+   - Read the last review output from `.context/compound-engineering/`
+   - Assess:
+     - Did the plan predict the files that actually changed? (compare plan scope against git diff)
+     - Were plan gaps avoidable with better research upfront?
+     - Did review catch issues that should have been in the plan?
+     - What would have made this cycle faster?
 
-It makes sense to invoke `ce:compound-refresh` when one or more of these are true:
+2. **Insert the Retroanalysis section** into the assembled document (before the Prevention section):
 
-1. A related learning or pattern doc recommends an approach that the new fix now contradicts
-2. The new fix clearly supersedes an older documented solution
-3. The current work involved a refactor, migration, rename, or dependency upgrade that likely invalidated references in older docs
-4. A pattern doc now looks overly broad, outdated, or no longer supported by the refreshed reality
-5. The Related Docs Finder surfaced high-confidence refresh candidates in the same problem space
+```markdown
+## Retroanalysis
 
-It does **not** make sense to invoke `ce:compound-refresh` when:
+### Plan Accuracy
+- Predicted correctly: {files that were actually changed}
+- Unexpected changes: {files changed that weren't in plan scope}
 
-1. No related docs were found
-2. Related docs still appear consistent with the new learning
-3. The overlap is superficial and does not change prior guidance
-4. Refresh would require a broad historical review with weak evidence
+### Process Assessment
+- Avoidable gaps: {gaps that better research would have prevented}
+- Plan → review gap: {issues caught by review that planning should have caught}
+- Cycle speed: {what slowed the cycle down}
 
-Use these rules:
+### Process Improvement Suggestions
+- {Actionable suggestion 1}
+- {Actionable suggestion 2}
+```
 
-- If there is **one obvious stale candidate**, invoke `ce:compound-refresh` with a narrow scope hint after the new learning is written
-- If there are **multiple candidates in the same area**, ask the user whether to run a targeted refresh for that module, category, or pattern set
-- If context is already tight or you are in compact-safe mode, do not expand into a broad refresh automatically; instead recommend `ce:compound-refresh` as the next step with a scope hint
+3. **Validate** YAML frontmatter (still before write)
+4. **Write** the file
+5. **Ask** if suggestions are actionable: "Should I add this to CLAUDE.md or AGENTS.md?"
 
-When invoking or recommending `ce:compound-refresh`, be explicit about the argument to pass. Prefer the narrowest useful scope:
+**Compact-safe mode**: Retroanalysis is skipped. The lightweight assessment is folded into the compact doc's prevention section instead.
 
-- **Specific file** when one learning or pattern doc is the likely stale artifact
-- **Module or component name** when several related docs may need review
-- **Category name** when the drift is concentrated in one solutions area
-- **Pattern filename or pattern topic** when the stale guidance lives in `docs/solutions/patterns/`
-
-Examples:
-
-- `/ce:compound-refresh plugin-versioning-requirements`
-- `/ce:compound-refresh payments`
-- `/ce:compound-refresh performance-issues`
-- `/ce:compound-refresh critical-patterns`
-
-A single scope hint may still expand to multiple related docs when the change is cross-cutting within one domain, category, or pattern area.
-
-Do not invoke `ce:compound-refresh` without an argument unless the user explicitly wants a broad sweep.
-
-Always capture the new learning first. Refresh is a targeted maintenance follow-up, not a prerequisite for documentation.
+**Note**: Plan gap file `.context/compound-engineering/plan-gaps.md` is **never deleted** after compound. It persists for future retroanalysis.
 
 ### Phase 3: Optional Enhancement
 

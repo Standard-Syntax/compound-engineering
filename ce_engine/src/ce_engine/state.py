@@ -27,6 +27,17 @@ class RuffError(BaseModel):
     message: str
 
 
+class SolutionSummary(BaseModel, frozen=True):
+    """Summary of a relevant compound doc for context pack."""
+
+    title: str
+    module: str
+    root_cause: str
+    solution: str
+    file_path: str
+    relevance_tags: list[str] = Field(default_factory=list)
+
+
 class WorkIntent(BaseModel):
     """LLM-declared intent for the current iteration.
 
@@ -74,6 +85,8 @@ class WorkState(BaseModel):
     # Context
     context_pack_path: Path = Path(".context/compound-engineering/context-pack.md")
     relevant_learnings: str = ""
+    relevant_solutions: list[SolutionSummary] = Field(default_factory=list)
+    research_artifact_path: str | None = None
 
     # LLM output
     work_intent: WorkIntent | None = None

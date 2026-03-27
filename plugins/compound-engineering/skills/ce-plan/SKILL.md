@@ -83,6 +83,25 @@ Then use the artifact as the sole research input for the rest of this skill. Do 
 
 **Why this matters:** Reusing existing research is faster, cheaper, and produces consistent understanding across sessions. Research artifacts in `docs/research/` are the compact outputs of prior `/ce:research` sessions — use them.
 
+### 0.6. Plan Gap Pre-Search
+
+**Before planning**, search for prior plan gap data to avoid repeating the same gaps:
+
+1. Search `docs/solutions/` for compound docs with `plan_gaps_encountered: true` in frontmatter:
+   ```bash
+   grep -l "plan_gaps_encountered: true" docs/solutions/**/*.md 2>/dev/null | head -10
+   ```
+2. For each matching doc, read the YAML frontmatter and the "Plan Gaps Encountered" section
+3. If any gaps are relevant to the current feature being planned, surface them:
+
+> **Prior plans for [feature] missed [pattern] — see [doc]**
+>
+> - **[Gap N]**: {description}
+
+4. Pass relevant gap findings to the planner's context so they can be addressed in the plan
+
+This helps avoid "planning gaps" — the same mistakes repeated across planning cycles.
+
 Refine the idea through collaborative dialogue using the **AskUserQuestion tool**:
 
 - Ask questions one at a time to understand the idea fully
