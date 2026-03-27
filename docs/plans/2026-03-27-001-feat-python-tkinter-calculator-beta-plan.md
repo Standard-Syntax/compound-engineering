@@ -1,7 +1,7 @@
 ---
 title: feat: Add Python Tkinter calculator app
 type: feat
-status: active
+status: completed
 date: 2026-03-27
 origin: docs/brainstorms/2026-03-27-python-tkinter-calculator-requirements.md
 ---
