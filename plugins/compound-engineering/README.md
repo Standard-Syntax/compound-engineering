@@ -6,7 +6,7 @@ AI-powered development tools that get smarter with every use. Make each unit of 
 
 | Component | Count |
 |-----------|-------|
-| Agents | 29 |
+| Agents | 32 |
 | Skills | 73 |
 | MCP Servers | 1 |
 
@@ -44,7 +44,10 @@ Agents are organized into categories for easier discovery.
 | `git-history-analyzer` | Analyze git history and code evolution |
 | `issue-intelligence-analyst` | Analyze GitHub issues to surface recurring themes and pain patterns |
 | `learnings-researcher` | Search institutional learnings for relevant past solutions |
-| `repo-research-analyst` | Research repository structure and conventions |
+| `repo-research-analyst` | Research repository structure and conventions (deprecated) |
+| `codebase-locator` | Find file and directory locations matching a research question |
+| `codebase-analyzer` | Analyze how specific files work — signatures, data flows, dependencies |
+| `codebase-pattern-finder` | Find verbatim examples of existing code patterns |
 
 ### Design
 
@@ -82,8 +85,7 @@ Core workflow commands use `ce:` prefix to unambiguously identify them as compou
 | `/ce:scaffold` | Generate a new Python 3.13 project skeleton |
 | `/ce:retrospect` | Analyze learnings from the past two weeks and surface patterns |
 | `/ce:calibrate` | Record estimation accuracy for iteration planning |
-
-### Utility Commands
+| `/ce:guided` | Guided workflow with mandatory human gates between each phase |
 
 | Command | Description |
 |---------|-------------|

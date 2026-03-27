@@ -2,6 +2,8 @@
 name: repo-research-analyst
 description: "Conducts thorough research on repository structure, documentation, conventions, and implementation patterns. Use when onboarding to a new codebase or understanding project conventions."
 model: inherit
+deprecated: true
+deprecated_reason: "Split into codebase-locator, codebase-analyzer, and codebase-pattern-finder. These specialized agents produce structured JSON and can be dispatched in parallel by ce:research. Use the specialized agents instead."
 ---
 
 <examples>

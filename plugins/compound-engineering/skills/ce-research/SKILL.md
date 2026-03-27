@@ -53,23 +53,33 @@ Run these agents **in parallel**. Each returns text data to the orchestrator —
 
 <parallel_tasks>
 
-#### 1. Repo Structure Analyst
-- Task compound-engineering:research:repo-research-analyst(Scope: technology, architecture, patterns. {research_question})
-- Returns: Technology stack, architecture patterns, file locations relevant to the question
+#### 1. Codebase Locator
+- Task compound-engineering:research:codebase-locator(Scope: technology, architecture. {research_question})
+- Returns: File and directory locations relevant to the question
 
-#### 2. Best Practices Researcher
+#### 2. Codebase Analyzer
+- Task compound-engineering:research:codebase-analyzer(Scope: technology, architecture. {research_question})
+- Returns: Component interfaces, data flows, and dependencies
+
+#### 3. Codebase Pattern Finder
+- Task compound-engineering:research:codebase-pattern-finder(Scope: patterns. {research_question})
+- Returns: Verbatim pattern instances with file:line references
+
+#### 4. Best Practices Researcher
 - Task compound-engineering:research:best-practices-researcher({research_question})
 - Returns: External best practices, relevant URLs, industry standards
 
-#### 3. Framework Docs Researcher
+#### 5. Framework Docs Researcher
 - Task compound-engineering:research:framework-docs-researcher({research_question})
 - Returns: Framework documentation references, Context7 findings
 
-#### 4. Git History Analyst
+#### 6. Git History Analyst
 - Task compound-engineering:research:git-history-analyzer({research_question})
 - Returns: Recent relevant changes, historical context, file:line references
 
 </parallel_tasks>
+
+**Parallel dispatch limits:** 120 seconds timeout per sub-agent. If a sub-agent times out, include `status: timed_out` in the artifact and proceed with remaining agents' outputs.
 
 **Critical:** Sub-agents must return TEXT DATA — not Write, Edit, or create files. Only the orchestrator writes the final artifact.
 
