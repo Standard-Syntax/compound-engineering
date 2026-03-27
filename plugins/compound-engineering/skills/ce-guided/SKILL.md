@@ -192,6 +192,7 @@ Run `/ce:research $ARGUMENTS`
 
 After completion:
 - Locate the research artifact (use `ls docs/research/*.md | tail -1` to find the most recent)
+  > **Constraint:** Do not run parallel manual `/ce:research`, `/ce:plan`, or `/ce:compound` sessions while a guided session is active.
 - Update manifest: `research_artifact` = path to produced artifact (atomic write)
 - Proceed to Gate 1
 
@@ -221,6 +222,7 @@ Research: docs/research/YYYY-MM-DD-slug.md
 
 After completion:
 - Locate the plan artifact (use `ls docs/plans/*.md | tail -1` to find the most recent)
+  > **Constraint:** Do not run parallel manual `/ce:research`, `/ce:plan`, or `/ce:compound` sessions while a guided session is active.
 - Update manifest: `plan_path` = path to produced plan (atomic write)
 - Proceed to Gate 2
 
@@ -293,6 +295,7 @@ Run `/ce:compound`
 
 After completion:
 - Locate the solution document (use `ls docs/solutions/*.md | tail -1` to find the most recent)
+  > **Constraint:** Do not run parallel manual `/ce:research`, `/ce:plan`, or `/ce:compound` sessions while a guided session is active.
 - Update manifest: `solution_path` = path to produced solution doc (atomic write)
 - Set manifest `status: completed`
 - Announce session summary
