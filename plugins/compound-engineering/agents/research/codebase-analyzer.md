@@ -66,7 +66,7 @@ Return structured JSON (not Markdown prose):
       "public_interface": [
         { "signature": "function_name(args) -> return_type", "description": "what it does" }
       ],
-      "side_effects": "none | reads: X | writes: Y | network: Z",
+      "side_effects": "none | reads | writes | network | mixed",
       "data_flow": ["Component A", "Component B", "Component C"]
     }
   ]
