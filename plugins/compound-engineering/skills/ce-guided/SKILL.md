@@ -1,8 +1,9 @@
 ---
 name: ce:guided
-description: "Guided compound engineering workflow with mandatory human gates between each phase: research -> plan -> work -> review -> compound. Use for complex or brownfield tasks where human oversight at decision points is worth the time."
+description: "Guided compound engineering workflow with mandatory human gates between each phase: research -> plan -> work -> review -> compound. Use for complex or brownfield tasks where human oversight at decision points is worth the time. Note: this workflow requires human input at each gate and cannot run autonomously."
 argument-hint: "[feature description]"
 disable-model-invocation: false
+agent_native: false
 ---
 
 # /ce:guided — Guided Compound Engineering Workflow
