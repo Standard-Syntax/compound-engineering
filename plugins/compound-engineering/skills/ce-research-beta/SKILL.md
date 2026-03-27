@@ -55,15 +55,15 @@ Run these agents **in parallel**. Each returns text data to the orchestrator —
 <parallel_tasks>
 
 #### 1. Codebase Locator
-- Task compound-engineering:research:codebase-locator(Scope: technology, architecture. {research_question})
+- Task compound-engineering:research:codebase-locator({research_question})
 - Returns: File and directory locations relevant to the question
 
 #### 2. Codebase Analyzer
-- Task compound-engineering:research:codebase-analyzer(Scope: technology, architecture. {research_question})
+- Task compound-engineering:research:codebase-analyzer({research_question})
 - Returns: Component interfaces, data flows, and dependencies
 
 #### 3. Codebase Pattern Finder
-- Task compound-engineering:research:codebase-pattern-finder(Scope: patterns. {research_question})
+- Task compound-engineering:research:codebase-pattern-finder({research_question})
 - Returns: Verbatim pattern instances with file:line references
 
 #### 4. Best Practices Researcher
