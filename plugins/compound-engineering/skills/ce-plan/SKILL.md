@@ -230,6 +230,10 @@ origin: docs/brainstorms/YYYY-MM-DD-<topic>-requirements.md  # if originated fro
 
 [Brief problem/feature description]
 
+## Desired End State
+
+[The target state after implementation — what the system looks like, how to verify it's correct, and what success looks like in concrete terms]
+
 ## Acceptance Criteria
 
 - [ ] Core requirement 1
@@ -304,6 +308,10 @@ origin: docs/brainstorms/YYYY-MM-DD-<topic>-requirements.md  # if originated fro
 ## Overview
 
 [Comprehensive description]
+
+## Desired End State
+
+[The target state after implementation. Include: what the system looks like, how to verify correctness, and what concrete success indicators exist. This is the north star for implementation decisions.]
 
 ## Problem Statement / Motivation
 
@@ -401,6 +409,10 @@ origin: docs/brainstorms/YYYY-MM-DD-<topic>-requirements.md  # if originated fro
 ## Overview
 
 [Executive summary]
+
+## Desired End State
+
+[The target state after implementation. Describe: what the system looks like, how correctness is verified, and what concrete success indicators exist. This section is the north star — implementation decisions should be consistent with this state. Include both functional outcomes (what it does) and quality attributes (how well it performs, security posture, etc.).]
 
 ## Problem Statement
 
