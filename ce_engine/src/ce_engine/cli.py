@@ -4,7 +4,6 @@ Uses Pydantic CliInput for argument validation and anyio.run() for
 the async entry point.
 """
 
-import functools
 import logging
 import sys
 import uuid
@@ -15,16 +14,14 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command, RunnableConfig
 
 from ce_engine.config import settings
-from ce_engine.graph import build_work_graph
+from ce_engine.graph import build_work_graph_async
 from ce_engine.state import WorkState
 
 _MAX_TASK_LENGTH = 1000
 
 
-@functools.cache
-def _get_work_graph() -> CompiledStateGraph:
-    """Cached compiled graph. functools.cache makes the result immutable after first call."""
-    return build_work_graph()
+# Cached compiled graph — rebuilt per session via build_work_graph_async
+_compiled_graph: CompiledStateGraph | None = None
 
 
 def _validate_task_description(task: str) -> str:
@@ -89,6 +86,8 @@ def _get_interrupt_response(session_id: str, interrupt_type: str) -> str:
     This allows agents to provide interrupt responses by pre-creating response files:
     /tmp/ce-work-{session_id}-{interrupt_type}.response
     """
+    if ".." in session_id or "/" in session_id or "\\" in session_id:
+        raise ValueError("session_id must not contain path traversal characters")
     response_file = Path(f"/tmp/ce-work-{session_id}-{interrupt_type}.response")
     try:
         response = response_file.read_text().strip()
@@ -148,7 +147,10 @@ async def _run_work(task: str, plan_ref: str, session_id: str | None = None) -> 
         plan_ref: Path to the plan file.
         session_id: Existing session ID to resume. If None, starts fresh.
     """
-    graph = _get_work_graph()
+    global _compiled_graph
+    if _compiled_graph is None:
+        _compiled_graph = await build_work_graph_async()
+    graph = _compiled_graph
     thread_id = session_id or str(uuid.uuid4())
     config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
 

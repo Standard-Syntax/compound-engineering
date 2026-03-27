@@ -5,6 +5,7 @@ All nodes are async def. Subprocess calls use anyio.fail_after() for timeout
 cached via functools.cache to preserve the connection pool across retries.
 """
 
+import datetime
 import functools
 import json
 import logging
@@ -26,7 +27,7 @@ from tenacity import (
 
 from ce_engine.config import settings
 from ce_engine.prompts import build_work_prompt
-from ce_engine.state import RuffError, WorkIntent, WorkState, make_continue_intent
+from ce_engine.state import RuffError, SolutionSummary, WorkIntent, WorkState, make_continue_intent
 from ce_engine.toolchain import (
     compute_error_delta,
     run_command,
@@ -107,10 +108,73 @@ async def _run_lint_checks(path: str = ".") -> tuple[list[RuffError], str]:
     return ruff_errors, ty_output
 
 
+def _token_estimate(text: str) -> int:
+    """Estimate token count (rough: ~4 chars per token)."""
+    return len(text) // 4
+
+
+def _extract_plan_metadata(plan_ref: str) -> str:
+    """Extract deferred questions, scope boundaries, and phase definitions from plan file."""
+    if not plan_ref:
+        return ""
+    plan_path = Path(plan_ref)
+    if not plan_path.exists():
+        return ""
+
+    try:
+        content = plan_path.read_text()
+    except OSError:
+        return ""
+
+    lines = content.split("\n")
+    sections: list[str] = []
+    in_scope = False
+
+    for line in lines:
+        stripped = line.strip()
+        # Scope boundaries
+        if any(
+            stripped.lower() == marker.lower()
+            for marker in ["out of scope", "not doing", "excludes", "scope boundaries"]
+        ):
+            sections.append(f"\n## {stripped}\n")
+            in_scope = True
+        elif in_scope and stripped.startswith("## "):
+            in_scope = False
+        elif in_scope and stripped:
+            sections.append(f"  {stripped}\n")
+
+        # Deferred / unknown markers
+        is_deferred = any(
+            stripped.lower().startswith(marker.lower())
+            for marker in ["deferred:", "unknown:", "tbd:", "implementation-time unknowns:"]
+        )
+        is_question = stripped.rstrip().endswith("?") and len(stripped) > 5
+        if (is_deferred or is_question) and not in_scope:
+            sections.append(f"\n## Deferred Question\n  {stripped}\n")
+
+        # Phase definitions
+        if stripped.startswith("## Phase ") or stripped.startswith("### Phase "):
+            sections.append(f"\n## {stripped}\n")
+            in_scope = False
+
+        # Verification criteria
+        if stripped.startswith("- [ ]") or stripped.startswith("* [ ]"):
+            sections.append(f"  {stripped}\n")
+
+    result = "".join(sections)
+    # Truncate if over 500 tokens (~2000 chars)
+    if _token_estimate(result) > 500:
+        result = result[:2000]
+    return result
+
+
 async def prefetch_node(state: WorkState) -> dict[str, Any]:
     """Run all tools and build the Context Pack before any LLM call.
 
     Runs ruff and ty concurrently via _run_lint_checks for 30-50% time reduction.
+    Enriches context pack with plan metadata, relevant compound doc summaries,
+    and research artifact references.
     """
     ruff_errors, ty_output = await _run_lint_checks(".")
 
@@ -122,19 +186,171 @@ async def prefetch_node(state: WorkState) -> dict[str, Any]:
         else "No errors found."
     )
 
-    # Read the two most recent files in learnings/ (non-blocking)
-    def _read_learnings() -> str:
-        learnings_dir = settings.learnings_path
-        if not learnings_dir.exists():
-            return ""
-        recent = sorted(
-            learnings_dir.glob("*.md"),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )[:2]
-        return "\n".join(p.read_text()[:500] for p in recent) if recent else ""
+    # Search docs/solutions/ using frontmatter relevance scoring, fall back to learnings_path
+    def _read_learnings() -> tuple[str, list[SolutionSummary], str | None]:
+        def _parse_frontmatter(path: Path) -> dict[str, Any]:
+            """Parse YAML frontmatter from a markdown file without a YAML library."""
+            text = path.read_text()
+            if not text.startswith("---"):
+                return {}
+            end = text.find("\n---", 3)
+            if end == -1:
+                return {}
+            fm_text = text[4:end]
+            result: dict[str, Any] = {}
+            for line in fm_text.split("\n"):
+                if ":" not in line:
+                    continue
+                key, _, value = line.partition(":")
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if value.startswith("[") and value.endswith("]"):
+                    result[key] = [v.strip() for v in value[1:-1].split(",")]
+                else:
+                    result[key] = value
+            return result
 
-    relevant_learnings = await to_thread_run_sync(_read_learnings)
+        def _score_doc(fm: dict[str, Any], keywords: set[str]) -> int:
+            score = 0
+            module = str(fm.get("module", "")).lower()
+            component = str(fm.get("component", "")).lower()
+            problem_type = str(fm.get("problem_type", "")).lower()
+            tags: list[str] = fm.get("tags", []) or []
+            date_str = str(fm.get("date", ""))
+
+            for kw in keywords:
+                kw_lower = kw.lower()
+                if kw_lower in module:
+                    score += 3
+                if kw_lower in component:
+                    score += 2
+                if kw_lower in problem_type:
+                    score += 1
+                for tag in tags:
+                    if kw_lower in tag.lower():
+                        score += 2
+
+            if date_str:
+                try:
+                    doc_date = datetime.date.fromisoformat(date_str[:10])
+                    days_old = (datetime.date.today() - doc_date).days
+                    if days_old < 30:
+                        score += 1
+                except (ValueError, TypeError):
+                    pass
+
+            return score
+
+        def _read_solutions() -> tuple[list[tuple[int, str]], list[SolutionSummary]]:
+            solutions_dir = settings.solutions_path
+            if not solutions_dir.exists():
+                return [], []
+            candidates = list(solutions_dir.glob("**/*.md"))
+            if not candidates:
+                return [], []
+
+            task_keywords = set()
+            if state.task_description:
+                task_keywords.update(
+                    w.lower() for w in state.task_description.split() if len(w) > 3
+                )
+
+            scored: list[tuple[int, Path, dict[str, Any]]] = []
+            for path in candidates[:50]:
+                try:
+                    fm = _parse_frontmatter(path)
+                    score = _score_doc(fm, task_keywords)
+                    if score > 0:
+                        scored.append((score, path, fm))
+                except (OSError, ValueError) as exc:
+                    logging.debug("Failed to score doc %s: %s", path, exc)
+                    continue
+
+            scored.sort(key=lambda x: x[0], reverse=True)
+            top_entries = [(score, p, fm) for score, p, fm in scored[:5]]
+
+            results: list[tuple[int, str]] = []
+            summaries: list[SolutionSummary] = []
+            for score, path, fm in top_entries:
+                try:
+                    content = path.read_text()
+                    # Extract title from first H1
+                    title = ""
+                    for line_text in content.split("\n")[:20]:
+                        if line_text.startswith("# "):
+                            title = line_text[2:].strip()
+                            break
+                    # Extract metadata from frontmatter (already parsed)
+                    root_cause = str(fm.get("root_cause", ""))
+                    module_name = str(fm.get("module", ""))
+                    tags: list[str] = fm.get("tags", []) or []
+                    # Extract solution text (first 100 words after frontmatter)
+                    body_start = content.find("---", 3)
+                    if body_start == -1:
+                        body_start = 0
+                    body = content[body_start:].split("\n\n", 1)[-1] if body_start > 0 else content
+                    solution_words = " ".join(body.split())[:500]
+                    summaries.append(
+                        SolutionSummary(
+                            title=title or path.stem,
+                            module=module_name,
+                            root_cause=root_cause,
+                            solution=solution_words,
+                            file_path=str(path),
+                            relevance_tags=tags,
+                        )
+                    )
+                    results.append((score, content[:1000]))
+                except (OSError, ValueError) as exc:
+                    logging.debug("Failed to read solution doc %s: %s", path, exc)
+                    continue
+            return results, summaries
+
+        def _fallback_learnings() -> list[tuple[int, str]]:
+            learnings_dir = settings.learnings_path
+            if not learnings_dir.exists():
+                return []
+            recent = sorted(
+                learnings_dir.glob("*.md"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )[:2]
+            return [(0, p.read_text()[:500]) for p in recent]
+
+        def _find_research_artifact() -> str | None:
+            research_dir = Path("docs/research")
+            if not research_dir.exists():
+                return None
+            plan_tags = set(w.lower() for w in (state.task_description or "").split() if len(w) > 4)
+            for path in research_dir.glob("*.md"):
+                try:
+                    fm = _parse_frontmatter(path)
+                    path_tags = set(str(fm.get("tags", []) or []))
+                    path_topic = str(fm.get("topic", "")).lower()
+                    if plan_tags & path_tags or any(t in path_topic for t in plan_tags):
+                        return str(path)
+                except (OSError, ValueError) as exc:
+                    logging.debug("Failed to check research artifact %s: %s", path, exc)
+                    continue
+            return None
+
+        solutions_results, solution_summaries = _read_solutions()
+        if len(solutions_results) >= 2:
+            learnings_str = "\n".join(
+                f"[{score}]\n{content}" for score, content in solutions_results
+            )
+        else:
+            fallback = _fallback_learnings()
+            combined = solutions_results + fallback
+            learnings_str = "\n".join(f"[{score}]\n{content}" for score, content in combined[:2])
+
+        research_artifact = _find_research_artifact()
+        return learnings_str, solution_summaries, research_artifact
+
+    learnings_str, solution_summaries, research_artifact = await to_thread_run_sync(_read_learnings)
+
+    # Extract plan metadata
+    plan_metadata = await to_thread_run_sync(lambda: _extract_plan_metadata(state.plan_ref))
 
     # Get current git branch
     git_result = await run_command(
@@ -151,29 +367,123 @@ async def prefetch_node(state: WorkState) -> dict[str, Any]:
     context_pack_path = settings.context_pack_path
     context_pack_path.parent.mkdir(parents=True, exist_ok=True)
 
-    context_pack_content = (
+    # Build context pack sections
+    project_section = (
         "<project>\n"
         "  python: 3.13\n"
         "  package_manager: uv\n"
         "  linter: ruff\n"
         "  type_checker: ty\n"
         "</project>\n\n"
+    )
+    task_section = (
         "<current_task>\n"
         f"  branch: {git_branch}\n"
         f"  changed_files: {git_diff}\n"
         f"  task: {state.task_description}\n"
         f"  plan_ref: {state.plan_ref}\n"
         "</current_task>\n\n"
+    )
+    prefetch_section = (
         "<pre_fetched>\n"
         "  ruff_errors: |\n"
         f"    {json.dumps([e.model_dump() for e in ruff_errors], indent=4)}\n"
         "  ty_errors: |\n"
         f"    {ty_output}\n"
         "</pre_fetched>\n\n"
-        "<relevant_learnings>\n"
-        f"  {relevant_learnings or 'None available.'}\n"
-        "</relevant_learnings>\n"
     )
+    learnings_section = (
+        f"<relevant_learnings>\n  {learnings_str or 'None available.'}\n</relevant_learnings>\n\n"
+    )
+    plan_meta_section = (
+        f"<plan_metadata>\n  {plan_metadata or 'None extracted.'}\n</plan_metadata>\n\n"
+    )
+    solutions_section = (
+        "<relevant_solutions>\n"
+        + (
+            "\n".join(
+                f"  ## {s.title} (module: {s.module})\n"
+                f"  **Root cause**: {s.root_cause}\n"
+                f"  **Solution**: {s.solution[:100]}...\n"
+                for s in solution_summaries[:3]
+            )
+            if solution_summaries
+            else "  None available.\n"
+        )
+        + "\n</relevant_solutions>\n\n"
+    )
+    research_section = (
+        f"<research_artifact>\n  {research_artifact or 'None found.'}\n</research_artifact>\n\n"
+    )
+
+    # Token budget enforcement: total <= 4000 tokens
+    # Sections: project (~100) + task (~200) + prefetch (~500-1500) + learnings (~500-1500)
+    #          + plan_metadata (~500) + solutions (~300) + research (~100) = ~2700-4500
+    # Truncation priority: drop learnings first, then solutions, then plan_metadata
+    all_sections = [
+        project_section,
+        task_section,
+        prefetch_section,
+        learnings_section,
+        plan_meta_section,
+        solutions_section,
+        research_section,
+    ]
+    total_text = "".join(all_sections)
+    total_tokens = _token_estimate(total_text)
+
+    if total_tokens > 4000:
+        # Truncate learnings first (keep 1 entry if 2+ exist)
+        if len(solution_summaries) > 2:
+            solution_summaries = solution_summaries[:2]
+            solutions_section = (
+                "<relevant_solutions>\n"
+                + "\n".join(
+                    f"  ## {s.title} (module: {s.module})\n"
+                    f"  **Root cause**: {s.root_cause}\n"
+                    f"  **Solution**: {s.solution[:100]}...\n"
+                    for s in solution_summaries[:2]
+                )
+                + "\n</relevant_solutions>\n\n"
+            )
+            all_sections = [
+                project_section,
+                task_section,
+                prefetch_section,
+                learnings_section,
+                plan_meta_section,
+                solutions_section,
+                research_section,
+            ]
+            total_text = "".join(all_sections)
+            total_tokens = _token_estimate(total_text)
+
+        if total_tokens > 4000:
+            # Truncate learnings at line boundary (~500 chars)
+            truncated_lines: list[str] = []
+            chars = 0
+            for line in learnings_str.split("\n"):
+                if chars + len(line) > 500:
+                    break
+                truncated_lines.append(line)
+                chars += len(line)
+            truncated = "\n".join(truncated_lines)
+            learnings_section = (
+                "<relevant_learnings>\n"
+                f"  {truncated if truncated else 'None available.'}\n"
+                "</relevant_learnings>\n\n"
+            )
+            all_sections = [
+                project_section,
+                task_section,
+                prefetch_section,
+                learnings_section,
+                plan_meta_section,
+                solutions_section,
+                research_section,
+            ]
+
+    context_pack_content = "".join(all_sections)
 
     def _write_context_pack() -> None:
         context_pack_path.write_text(context_pack_content)
@@ -185,7 +495,9 @@ async def prefetch_node(state: WorkState) -> dict[str, Any]:
         "error_current": ruff_errors,
         "error_delta": error_delta,
         "context_pack_path": context_pack_path,
-        "relevant_learnings": relevant_learnings,
+        "relevant_learnings": learnings_str,
+        "relevant_solutions": solution_summaries,
+        "research_artifact_path": research_artifact,
         "approved": False,
     }
 

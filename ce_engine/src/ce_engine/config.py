@@ -23,7 +23,9 @@ class EngineSettings(BaseSettings):
     pytest_timeout: float = 120.0
     context_pack_path: Path = Path(".context/compound-engineering/context-pack.md")
     learnings_path: Path = Path(".context/compound-engineering/learnings")
+    solutions_path: Path = Path("docs/solutions")
     plan_gaps_path: Path = Path(".context/compound-engineering/plan-gaps.md")
+    checkpoint_db_path: Path = Path(".context/compound-engineering/checkpoints.db")
 
 
 settings = EngineSettings()
