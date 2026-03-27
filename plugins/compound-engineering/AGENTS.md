@@ -151,6 +151,17 @@ Some skills are exact copies from external upstream repositories, vendored local
 
 Beta skills use a `-beta` suffix and `disable-model-invocation: true` to prevent accidental auto-triggering. See `docs/solutions/skill-design/beta-skills-framework.md` for naming, validation, and promotion rules.
 
+## Agent Deprecation
+
+Agents may be deprecated without removal. Add to the agent's frontmatter:
+
+```yaml
+deprecated: true
+deprecated_reason: "<explanation and migration path>"
+```
+
+Deprecated agents remain functional but should not be used in new work.
+
 ## Documentation
 
 See `docs/solutions/plugin-versioning-requirements.md` for detailed versioning workflow.
