@@ -54,7 +54,8 @@ Return structured JSON (not Markdown prose):
 ```json
 {
   "agent": "codebase-analyzer",
-  "status": "complete",
+  "status": "complete | error",
+  "error": "<error message if status is error>",
   "components": [
     {
       "name": "<component_name>",

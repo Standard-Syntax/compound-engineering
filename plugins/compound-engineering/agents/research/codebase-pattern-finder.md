@@ -35,7 +35,7 @@ A pattern description. For example:
 
 1. **Find existing examples** — report what IS, not what SHOULD BE
 2. **Report verbatim** — include the actual code, not your summary of it
-3. **Provide context** — explain briefly why this pattern was used here
+3. **Provide context** — include surrounding code that provides context for this instance
 4. **Do NOT evaluate** — do not say whether the pattern is good or bad
 5. **Do NOT analyze** — do not explain the mechanics (that is `codebase-analyzer`'s job)
 6. **Do NOT recommend** — do not suggest different approaches
