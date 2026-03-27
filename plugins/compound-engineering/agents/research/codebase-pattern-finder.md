@@ -61,7 +61,7 @@ Return structured JSON (not Markdown prose):
       "file": "path/to/file.ext:line_range",
       "code": "<extracted code block>",
       "context": "<surrounding code explaining why this pattern was used>",
-      "similarity": "high | medium | low"
+      "similarity": "high | medium | low" // high: nearly identical code structure; medium: same intent but different variable names or minor structural differences; low: loosely related pattern, same general approach
     }
   ],
   "summary": {
